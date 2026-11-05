@@ -1,0 +1,68 @@
+// Grafana Alloy (successor to Promtail): tail Docker container logs and push
+// them to Loki. Only containers labelled `logging=alloy` are collected.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  filter {
+    name   = "label"
+    values = ["logging=alloy"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.json.receiver]
+}
+
+// Parse the API's structured JSON logs. Non-JSON lines (postgres, redis)
+// pass through untouched.
+loki.process "json" {
+  stage.json {
+    expressions = {
+      level     = "level",
+      service   = "service",
+      timestamp = "timestamp",
+    }
+  }
+
+  // Low-cardinality fields become stream labels; everything else stays in
+  // the line and is queryable with `| json`.
+  stage.labels {
+    values = {
+      level   = "",
+      service = "",
+    }
+  }
+
+  stage.timestamp {
+    source            = "timestamp"
+    format            = "RFC3339Nano"
+    action_on_failure = "skip"
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
