@@ -1,4 +1,4 @@
-.PHONY: up down reset logs test vet smoke psql
+.PHONY: up down reset logs test test-integration vet smoke psql
 
 up:
 	docker compose up -d --build
@@ -14,6 +14,12 @@ logs:
 
 test:
 	go test -race -count=1 ./...
+
+# Needs the compose Postgres (`docker compose up -d postgres`). Each test gets
+# its own throwaway database with all migrations applied (internal/testutil/pgtest).
+TEST_DATABASE_URL ?= postgres://auth:auth_dev_password@localhost:5432/auth?sslmode=disable
+test-integration:
+	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test -race -count=1 -tags integration ./...
 
 vet:
 	go vet ./...

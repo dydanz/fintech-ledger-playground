@@ -11,7 +11,10 @@ x-logging: &logging
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        CMD: api
     image: auth-api:local
     environment:
       SERVICE_NAME: auth-api
