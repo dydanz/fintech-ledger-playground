@@ -49,6 +49,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       # Runs once, on first start with an empty data volume.
       - ./migrations/001_init.up.sql:/docker-entrypoint-initdb.d/001_init.up.sql:ro
+      - ./migrations/002_ledger.up.sql:/docker-entrypoint-initdb.d/002_ledger.up.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
