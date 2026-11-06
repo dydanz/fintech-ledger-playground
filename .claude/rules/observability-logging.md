@@ -121,12 +121,13 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `auth.token` | C1 | denied=warn, failure=error | `missing_token`, `malformed_token`, `invalid_or_expired`, `session_store_error` | `api.Auth` middleware |
 | `audit.revoke` | C3 | success=info, partial=error, failure=warn | `pg_update_failed`, `no_open_record`, `orphan_compensation_failed` | `service.AuthService.Login` / `Logout` |
 | `user.profile_update` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `not_found`, `pg_error` | `service.UserService.UpdateProfile` |
-| `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `cmd/api` `retry` |
-| `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/api` (`started`, `stopping`, `stopped`) |
+| `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `startup.Retry` (every `cmd/*`) |
+| `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/*` `main` and `startup.Serve` |
 | `app.panic` | C5 | error | – | `api.Recovery` |
 | `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `service.LedgerService.OpenAccount` / `OpenLedger` / `EnsureSystemLedgers` |
 | `ledger.credit`, `ledger.debit` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `currency_unsupported`, `account_not_found`, `insufficient_funds`, `account_frozen`, `ledger_not_found`; failure: `pg_error` (Tx1 did not commit); partial: `tx2_timeout`, `tx2_error` (Tx1 committed, the transaction stays PENDING for the sweeper) | `service.LedgerService.Credit` / `Debit` (validation, Tx1) and `Process` (terminal state, once) |
 | `ledger.idempotency` | C1 | success=info (replay), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (key claim in Tx1) |
+| `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.Clients.Require` (ledger-api internal routes) |
 
 ### Current gaps (existing code predates this convention)
 
@@ -135,4 +136,3 @@ The code works but doesn't yet meet this convention. Bring each item into line w
 - `Register` and `UpdateProfile` log nothing on `denied` or `failure` paths.
 - The `auth.token` rejections in the `Auth` middleware are only visible through the access log's 401/503.
 - No dashboard panel exists for `audit.revoke` partial failures.
-- The `cmd/api` startup and retry logs have no `event` or `dependency` fields.

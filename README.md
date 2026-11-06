@@ -1,4 +1,4 @@
-Go/Gin authentication service with Redis-backed sessions, a PostgreSQL audit trail, and structured JSON logs shipped to Loki/Grafana.
+Go/Gin authentication service with Redis-backed sessions, a PostgreSQL audit trail, and structured JSON logs shipped to Loki/Grafana, plus **ledger-api**, an immutable, event-sourced balance ledger (design: [`spec/`](spec/)) that is being built in phases.
 
 ## Quick start
 
@@ -6,12 +6,14 @@ Go/Gin authentication service with Redis-backed sessions, a PostgreSQL audit tra
 cp .env.example .env      # optional: override dev passwords
 make up                   # docker compose up -d --build
 make smoke                # register -> login -> profile -> logout -> 401
+make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> auth checks
 ```
 
 | Service | URL |
 | :--- | :--- |
 | API | http://localhost:8080 |
-| Grafana | http://localhost:3000 (admin / admin), dashboard **auth-api › auth-api overview** |
+| ledger-api (internal) | http://localhost:8081, bound to 127.0.0.1 only |
+| Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview** |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |
 
@@ -27,6 +29,21 @@ make smoke                # register -> login -> profile -> logout -> 401
 | GET | `/healthz`, `/readyz` | – | – | liveness / dependency readiness |
 
 Errors are always `{"error":{"code","message","request_id"}}`.
+
+## ledger-api (internal)
+
+Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_CLIENTS` maps each `client_id` to the SHA-256 of its token and the operations it may perform (`account_open`, `credit`, `debit`, `void`, `freeze`, `unfreeze`, `read`). Every mutating call needs an `Idempotency-Key` header; a retry with the same key gets the original response back byte for byte (`Idempotent-Replayed: true`), a different request with the same key gets `422 idempotency_key_reused`, and one still in flight gets `409 request_in_progress`.
+
+| Method | Path | Operation | Success |
+| :--- | :--- | :--- | :--- |
+| POST | `/internal/v1/accounts` `{"user_id"}` | `account_open` | `201` new account with an IDR ledger, or `200` the existing one (one account per user) |
+| POST | `/internal/v1/accounts/:account_id/ledgers` `{"currency","overdraft_limit"?}` | `account_open` | `201` ledger |
+| POST | `/internal/v1/accounts/:account_id/credits` `{"amount","currency","counterparty"?,"reference"?,"metadata"?}` | `credit` | `201` SETTLED, or `202` PENDING |
+| POST | `/internal/v1/accounts/:account_id/debits` (same body) | `debit` | `201` SETTLED, `422 insufficient_funds` / `account_frozen`, or `202` |
+| GET | `/internal/v1/accounts/:account_id`, `/internal/v1/accounts?user_id=` | `read` | `200` account with balances |
+| GET | `/internal/v1/transactions/:transaction_id` | `read` | `200` transaction |
+
+Amounts are integers in the currency's minor unit (IDR has none). The dev tokens in `.env.example` are `dev-onboarding-token`, `dev-payments-token` and `dev-ops-token`; replace them anywhere but your laptop. Void, freeze, the Kafka relay and the fraud engine arrive in later phases (see the development plan in `spec/`).
 
 ## How it works
 
@@ -91,6 +108,19 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 | `SERVICE_NAME` | `auth-api` | value of the `service` log field |
 | `SHUTDOWN_TIMEOUT` | `15s` | graceful drain on SIGTERM |
 
+ledger-api additionally reads (TRD §12.2):
+
+| Variable | Default | Notes |
+| :--- | :--- | :--- |
+| `LEDGER_HTTP_ADDR` | `:8081` | |
+| `LEDGER_CLIENTS` | – (required) | `client_id:sha256(token):op,op;…` |
+| `LEDGER_OVERDRAFT_CLIENTS` | – | clients allowed to set `overdraft_limit` |
+| `LEDGER_CURRENCIES` | `IDR` | the first one is opened with every account |
+| `LEDGER_MAX_AMOUNT` | `1000000000000` | per transaction, minor units |
+| `LEDGER_PROCESS_TIMEOUT` | `2s` | bound on each of Tx1 and Tx2; past it the client gets `202` |
+| `IDEMPOTENCY_TTL` | `24h` | |
+| `KAFKA_TOPIC_EVENTS` | `ledger.events.v1` | topic written to the outbox |
+
 The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally not configurable.
 
 ## Database migrations
@@ -102,10 +132,15 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 ## Layout
 
 ```
-cmd/api/              entrypoint, graceful shutdown, container healthcheck
+cmd/api/              auth-api entrypoint
+cmd/ledger-api/       ledger-api entrypoint
+internal/startup/     dependency retry, graceful serve, container healthcheck (shared by cmd/*)
+internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)
+internal/idempotency/ Idempotency-Key hashing and request fingerprints
+internal/outbox/      Kafka envelope written to ledger.outbox
 internal/api/         router, middleware (request ctx, access log, recovery, auth), handlers
-internal/service/     auth + profile business logic
-internal/repository/  PostgreSQL (pgx) users + token history
+internal/service/     auth, profile and ledger business logic
+internal/repository/  PostgreSQL (pgx): users, token history, ledger
 internal/session/     Redis session store
 internal/token/       token generation / hashing
 internal/logger/      slog JSON logger

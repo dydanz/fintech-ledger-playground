@@ -21,30 +21,10 @@ type Deps struct {
 }
 
 func NewRouter(d Deps) (*gin.Engine, error) {
-	r := gin.New()
-	r.HandleMethodNotAllowed = true
-	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
+	r, err := newEngine(d.Logger, d.TrustedProxies, d.Ready)
+	if err != nil {
 		return nil, err
 	}
-
-	r.Use(RequestContext(d.Logger), AccessLog(), Recovery(), BodyLimit(maxBodyBytes))
-
-	r.NoRoute(func(c *gin.Context) { abortError(c, http.StatusNotFound, "not_found", "route not found") })
-	r.NoMethod(func(c *gin.Context) {
-		abortError(c, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-	})
-
-	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
-	r.GET("/readyz", func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-		defer cancel()
-		if err := d.Ready(ctx); err != nil {
-			_ = c.Error(err)
-			abortError(c, http.StatusServiceUnavailable, "not_ready", "dependencies unavailable")
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ready"})
-	})
 
 	h := &Handlers{auth: d.Auth, users: d.Users}
 	requireAuth := Auth(d.Sessions)
@@ -61,5 +41,35 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		users.PUT("/profile", h.UpdateProfile)
 	}
 
+	return r, nil
+}
+
+// newEngine builds the base every service shares: the middleware chain,
+// JSON 404/405, /healthz and /readyz (ready checks the dependencies).
+func newEngine(log *slog.Logger, trustedProxies []string, ready func(ctx context.Context) error) (*gin.Engine, error) {
+	r := gin.New()
+	r.HandleMethodNotAllowed = true
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		return nil, err
+	}
+
+	r.Use(RequestContext(log), AccessLog(), Recovery(), BodyLimit(maxBodyBytes))
+
+	r.NoRoute(func(c *gin.Context) { abortError(c, http.StatusNotFound, "not_found", "route not found") })
+	r.NoMethod(func(c *gin.Context) {
+		abortError(c, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	})
+
+	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/readyz", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := ready(ctx); err != nil {
+			_ = c.Error(err)
+			abortError(c, http.StatusServiceUnavailable, "not_ready", "dependencies unavailable")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
 	return r, nil
 }
