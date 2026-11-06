@@ -70,8 +70,22 @@ func New(t testing.TB) *pgxpool.Pool {
 	return pool
 }
 
-// migrate runs each up migration through the simple protocol, which allows
-// the multi-statement files (BEGIN ... COMMIT) the repo uses.
+// ExecMigration runs one file from migrations/ (e.g. "002_ledger.down.sql")
+// against pool, failing the test on error. Use it to test down migrations.
+func ExecMigration(t testing.TB, pool *pgxpool.Pool, name string) {
+	t.Helper()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("pgtest: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := execFile(ctx, pool, filepath.Join(root, "migrations", name)); err != nil {
+		t.Fatalf("pgtest: %v", err)
+	}
+}
+
+// migrate applies every up migration in filename order.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	root, err := repoRoot()
 	if err != nil {
@@ -85,20 +99,28 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return errors.New("no migrations found in " + filepath.Join(root, "migrations"))
 	}
 	sort.Strings(files)
+	for _, f := range files {
+		if err := execFile(ctx, pool, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// execFile runs a SQL file through the simple protocol, which allows the
+// multi-statement files (BEGIN ... COMMIT) the repo uses.
+func execFile(ctx context.Context, pool *pgxpool.Pool, path string) error {
+	sql, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
 	defer conn.Release()
-	for _, f := range files {
-		sql, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-		if _, err := conn.Conn().PgConn().Exec(ctx, string(sql)).ReadAll(); err != nil {
-			return errors.New("apply " + filepath.Base(f) + ": " + err.Error())
-		}
+	if _, err := conn.Conn().PgConn().Exec(ctx, string(sql)).ReadAll(); err != nil {
+		return errors.New("apply " + filepath.Base(path) + ": " + err.Error())
 	}
 	return nil
 }

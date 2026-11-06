@@ -190,6 +190,8 @@ The BRD's `TOPUP_REQUESTED → TOPUP_PROCESSING → TOPUP_SETTLED` maps to `Tran
 
 Everything lives in schema `ledger` in the existing Postgres. IDs are UUIDv7, generated in the app with `github.com/google/uuid` `NewV7`, so they sort by time and index well.
 
+> **`migrations/002_ledger.up.sql` is authoritative.** The SQL below is the design sketch. The migration adds, beyond it: named CHECKs for every enum and format (`trace_id`, currency, event type per stream type), composite FKs `(ledger_id, currency)` so a journal line or transaction can't carry a currency different from its ledger's, the per-partition TRUNCATE guards and the `journal_entries_balanced` trigger from §5.1, `ledger.ensure_partitions()`, and the `idempotency_keys` change below.
+
 ```sql
 BEGIN;
 CREATE SCHEMA ledger;
@@ -303,7 +305,8 @@ CREATE TABLE ledger.idempotency_keys (
     client_id           TEXT        NOT NULL,
     key_hash            CHAR(64)    NOT NULL,          -- sha256(Idempotency-Key); the raw key is never stored
     request_fingerprint CHAR(64)    NOT NULL,          -- sha256(method|route|canonical JSON body)
-    transaction_id      UUID        NOT NULL,
+    operation           TEXT        NOT NULL,          -- account_open | ledger_open | credit | debit | void | freeze | unfreeze
+    resource_id         UUID        NOT NULL,          -- transaction, account or ledger id the key produced
     response_status     SMALLINT,                      -- NULL while in flight
     response_body       JSONB,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -347,12 +350,15 @@ COMMIT;
 | 1 user ↔ 1 account | `accounts.user_id UNIQUE` | — |
 | One void per original | `transactions_single_void_key` and the original's row lock | Reconciler |
 | Gapless `ledger_sequence` and unique stream versions | Assigned as `last+1` while holding the projection row lock | Per-partition unique indexes; reconciler gap and duplicate scan |
-| Each transaction's lines sum to 0 | `JournalRepo.Post` inserts both lines in one statement, built from one `Money` | Reconciler `unbalanced_transaction` check |
+| Each transaction has exactly 2 lines, one currency, summing to 0 | `journal_entries_balanced`: a `DEFERRABLE INITIALLY DEFERRED` constraint trigger that checks at COMMIT. `JournalRepo.Post` inserts both lines in one statement, sharing `created_at`. | Reconciler `unbalanced_transaction` check (catches a stray line with a different `created_at`) |
+| A line's or transaction's currency equals its ledger's | Composite FKs `(ledger_id, currency)` → `ledgers (id, currency)` | — |
 | Duplicate requests | `idempotency_keys` primary key | Redis cache is only an optimisation |
 
 **Partitioning caveat.** Postgres can't enforce a unique index across partitions unless it includes the partition key. Global uniqueness of `(ledger_id, ledger_sequence)` and `(stream_id, stream_version)` therefore rests on serialized assignment under the row lock. Each monthly partition also gets a local unique index, and the reconciler scans for gaps or duplicates at partition boundaries.
 
-**P1 implementation check.** Before P1 merges, verify whether PG 17 supports a `DEFERRABLE` constraint trigger on the partitioned `journal_entries` for a commit-time "lines sum to 0" check. Add it if supported. Otherwise the repo-level construction plus the reconciler is the control, and the PR records that.
+**P1 implementation check (resolved in P1.1).** PG 17.11 supports a `DEFERRABLE` constraint trigger on the partitioned `journal_entries`, so the commit-time check is in the database (`journal_entries_balanced`). Its lookup filters on the shared `created_at`, which prunes to one partition.
+
+**TRUNCATE bypass (found in P1.1).** Row-level triggers on a partitioned table are cloned to every partition, but statement-level TRUNCATE triggers are not: `TRUNCATE ledger.journal_entries_y2026m11` skipped the parent's guard and deleted the rows. `ledger.ensure_partitions()` therefore adds a TRUNCATE guard to every partition it creates, and an integration test covers it. `DROP TABLE` or `DETACH PARTITION` on a partition is DDL and isn't blocked by triggers; in production only `ledger_migrator` and `ledger_archiver` hold the privilege (§5.2).
 
 ### 5.2 Roles
 
@@ -519,7 +525,7 @@ Tx: SELECT … FROM accounts WHERE id=$acct FOR UPDATE
     already in target state → no event, return 200 (idempotent)
     append AccountFrozen | AccountUnfrozen (version+1) {reason, actor=client_id, rule?}
     UPDATE accounts SET status, version
-    UPDATE idempotency_keys … ; INSERT outbox ; NOTIFY
+    INSERT idempotency_keys (operation=freeze|unfreeze, resource_id=account_id, response) ; INSERT outbox ; NOTIFY
 COMMIT
 ```
 
