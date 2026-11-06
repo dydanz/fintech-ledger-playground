@@ -29,7 +29,7 @@ Every critical event is one `slog` record with these fields:
 | Field | Required | Rule |
 | :--- | :--- | :--- |
 | `message` | yes | Short human-readable sentence, lower case: `"login failed"`. |
-| `event` | yes | Stable machine name `<domain>.<action>`, lower snake case, never renamed once shipped. Dashboards and alerts key on this, never on `message`. Domains: `auth`, `user`, `audit`, `session`, `dependency`, `app`. |
+| `event` | yes | Stable machine name `<domain>.<action>`, lower snake case, never renamed once shipped. Dashboards and alerts key on this, never on `message`. Domains: `auth`, `user`, `audit`, `session`, `dependency`, `app`, `ledger`, `fraud`, `outbox`. |
 | `outcome` | yes | One of `success`, `failure` (our fault or a dependency's), `denied` (caller's fault: bad credentials, validation, forbidden), `partial` (C3: some steps succeeded). |
 | `reason` | on `failure`, `denied`, `partial` | snake_case value from a **fixed set** per event, listed in the catalog. Never free text and never `err.Error()`. |
 | `error` | on unexpected errors | `err.Error()` of the wrapped error. Only on `failure` and `partial`. |
@@ -37,6 +37,12 @@ Every critical event is one `slog` record with these fields:
 | `duration_ms` | C4, and slow operations | float milliseconds |
 | `user_id` | whenever known | Already added automatically after the auth middleware runs. Pass it explicitly before that point (e.g. at login). |
 | `token_hash` | C3 only | Allowed only so a broken session can be reconciled. Never on other events. |
+| `account_id`, `ledger_id`, `transaction_id` | ledger events, whenever known | UUIDs. Use them to correlate with `ledger.*` tables; never log a user-supplied identifier instead. |
+| `amount`, `currency` | ledger money events | `amount` is an integer in minor units, `currency` is ISO 4217. Never a float or a formatted string. |
+| `client_id` | internal routes, after `ClientAuth` | The authenticated internal caller (e.g. `payments`, `fraud-engine`, `ops`). |
+| `actor` | freeze, unfreeze, void | Who initiated the action: a `client_id`. |
+| `rule` | `fraud.*`, `ledger.freeze` | Fraud rule name, from a fixed set (e.g. `topup_velocity`, `debit_volume`). |
+| `pending`, `lag_ms` | `outbox.lag` | Unpublished outbox row count, and age in milliseconds of the oldest one. |
 
 These fields are injected automatically. **Never set them by hand:** `timestamp`, `level`, `service`, `request_id`, `trace_id`, `span_id`. Always log through `logger.FromContext(ctx)` and the `*Context` methods so they're present.
 
@@ -71,7 +77,7 @@ log.ErrorContext(ctx, "session deleted but audit revoke failed",
 
 ## 5. Signals: making events observable
 
-- A new **error-level** event MUST get a panel or alert query in `deploy/grafana/dashboards/auth-api.json`, keyed on `event` (and `reason` where useful):
+- A new **error-level** event MUST get a panel or alert query in the dashboard of the service that emits it, keyed on `event` (and `reason` where useful): `deploy/grafana/dashboards/auth-api.json` for auth-api, `deploy/grafana/dashboards/ledger.json` for `ledger.*`, `outbox.*` and `fraud.*` events.
   ```logql
   sum by (reason) (count_over_time({service="auth-api", level="error"} | json | event="audit.revoke" [5m]))
   ```
@@ -84,6 +90,8 @@ log.ErrorContext(ctx, "session deleted but audit revoke failed",
 ## 6. Never log
 
 Passwords or password hashes, raw bearer tokens, `Authorization` headers, request or response bodies, query strings, emails or other PII (use `user_id`), DB connection strings, secrets or env values. `token_hash` is allowed only on C3 events.
+
+Ledger additions: transaction `reference` and `metadata` (caller-supplied free text), raw `Idempotency-Key` values (keys may embed caller data; the database stores only their SHA-256), and internal service tokens or their hashes.
 
 ## 7. Definition of done for any change
 
