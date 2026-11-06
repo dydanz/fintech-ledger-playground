@@ -107,9 +107,12 @@ internal/repository/  PostgreSQL (pgx) users + token history
 internal/session/     Redis session store
 internal/token/       token generation / hashing
 internal/logger/      slog JSON logger
+internal/testutil/    test helpers (pgtest: throwaway Postgres for integration tests)
 migrations/           SQL schema
 deploy/               loki, alloy, grafana provisioning
 ```
+
+The `Dockerfile` builds any binary under `cmd/`, chosen with the `CMD` build arg (default `api`): `docker build --build-arg CMD=api .`. Every binary must implement a `healthcheck` subcommand, which the image uses as its container healthcheck.
 
 ## Tests
 
@@ -121,7 +124,16 @@ deploy/               loki, alloy, grafana provisioning
 - profile validation
 - the structured log fields
 
-The SQL and repository layer are not covered by these tests. Exercise them with `make up && make smoke`.
+The SQL and repository layer are not covered by these tests. Exercise them with `make up && make smoke`, or with integration tests.
+
+**Integration tests** are Go tests behind the `integration` build tag, run against a real Postgres:
+
+```bash
+docker compose up -d postgres
+make test-integration   # TEST_DATABASE_URL defaults to the compose Postgres
+```
+
+`pgtest.New(t)` (in `internal/testutil/pgtest`) creates a throwaway database for each test, applies every `migrations/*.up.sql` in order, and drops the database afterwards. Tests are skipped when `TEST_DATABASE_URL` is unset. The role needs `CREATEDB`, which the compose `auth` role has.
 
 ## Not included (next steps)
 
