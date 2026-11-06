@@ -1,5 +1,3 @@
-# auth-api
-
 Go/Gin authentication service with Redis-backed sessions, a PostgreSQL audit trail, and structured JSON logs shipped to Loki/Grafana.
 
 ## Quick start
