@@ -21,6 +21,7 @@ import (
 
 const (
 	ctxRequestID = "request_id"
+	ctxTraceID   = "trace_id"
 	ctxUserID    = "auth.user_id"
 	ctxTokenHash = "auth.token_hash"
 
@@ -30,33 +31,53 @@ const (
 var (
 	requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	// W3C traceparent: version-traceid-parentid-flags
-	traceparentPattern = regexp.MustCompile(`^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$`)
+	traceparentPattern = regexp.MustCompile(`^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$`)
 )
 
-// RequestContext assigns a request ID (honouring a sane inbound X-Request-ID),
-// extracts W3C trace identifiers when present, and attaches a request-scoped
-// logger carrying those fields to the request context.
+// RequestContext assigns a request ID (honouring a sane inbound X-Request-ID)
+// and W3C trace identifiers (honouring a valid inbound traceparent, otherwise
+// generating new ones), echoes both as response headers, and attaches a
+// request-scoped logger carrying those fields to the request context.
 func RequestContext(base *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqID := c.GetHeader("X-Request-ID")
 		if !requestIDPattern.MatchString(reqID) {
-			reqID = newRequestID()
+			reqID = randomHex(16)
 		}
 		c.Set(ctxRequestID, reqID)
 		c.Header("X-Request-ID", reqID)
 
-		attrs := []any{slog.String("request_id", reqID)}
-		if m := traceparentPattern.FindStringSubmatch(c.GetHeader("traceparent")); m != nil {
-			attrs = append(attrs, slog.String("trace_id", m[1]), slog.String("span_id", m[2]))
+		traceID, spanID, flags, ok := parseTraceparent(c.GetHeader("traceparent"))
+		if !ok {
+			traceID, spanID, flags = randomHex(16), randomHex(8), "01"
 		}
-		l := base.With(attrs...)
+		c.Set(ctxTraceID, traceID)
+		c.Header("traceparent", "00-"+traceID+"-"+spanID+"-"+flags)
+
+		l := base.With(
+			slog.String("request_id", reqID),
+			slog.String("trace_id", traceID),
+			slog.String("span_id", spanID),
+		)
 		c.Request = c.Request.WithContext(logger.WithContext(c.Request.Context(), l))
 		c.Next()
 	}
 }
 
-func newRequestID() string {
-	b := make([]byte, 16)
+// parseTraceparent accepts a W3C traceparent header. Per the spec, version ff
+// and all-zero trace or parent IDs are invalid.
+func parseTraceparent(h string) (traceID, spanID, flags string, ok bool) {
+	m := traceparentPattern.FindStringSubmatch(h)
+	if m == nil || m[1] == "ff" || isAllZero(m[2]) || isAllZero(m[3]) {
+		return "", "", "", false
+	}
+	return m[2], m[3], m[4], true
+}
+
+func isAllZero(s string) bool { return strings.Trim(s, "0") == "" }
+
+func randomHex(n int) string {
+	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }

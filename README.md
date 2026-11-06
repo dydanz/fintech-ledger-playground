@@ -64,7 +64,7 @@ Every log line is a single JSON object on stdout:
 ```
 
 - `request_id` is taken from a well-formed inbound `X-Request-ID`, or generated, and echoed in the response header.
-- `trace_id` and `span_id` come from a W3C `traceparent` header when one is present.
+- `trace_id` and `span_id` come from a valid inbound W3C `traceparent` header. If it is missing or invalid, new ones are generated. Either way the `traceparent` in use is echoed in the response header.
 - Domain events (`login succeeded`, `login failed`, `logout succeeded`, …) share the same request-scoped fields.
 - The query string is never logged.
 
@@ -128,5 +128,5 @@ The SQL and repository layer are not covered by these tests. Exercise them with 
 ## Not included (next steps)
 
 - Rate limiting and lockout on `/login`
-- Metrics and tracing export (Prometheus, OTel); trace IDs are only propagated from inbound headers
+- Metrics and tracing export (Prometheus, OTel); trace IDs are propagated and logged but not exported
 - Logout-all-sessions and password change, which would need a per-user session index in Redis
