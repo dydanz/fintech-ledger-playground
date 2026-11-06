@@ -228,8 +228,12 @@ func TestCreditTx1Tx2(t *testing.T) {
 			LedgerSequence: seq, BalanceAfter: d.BalanceAfter}), l.ID); err != nil {
 			return err
 		}
-		if err := tx.UpdateTransaction(e.ctx, repository.TransactionUpdate{ID: rec.ID, Status: ledger.StatusSettled, Version: 3, LedgerID: l.ID, Settled: true}); err != nil {
+		updated, err := tx.UpdateTransaction(e.ctx, repository.TransactionUpdate{ID: rec.ID, Status: ledger.StatusSettled, Version: 3, LedgerID: l.ID, Settled: true})
+		if err != nil {
 			return err
+		}
+		if updated.Status != ledger.StatusSettled || updated.SettledAt == nil || updated.Version != 3 {
+			t.Fatalf("UpdateTransaction returned %+v", updated)
 		}
 		return tx.CompleteIdempotencyKey(e.ctx, key.ClientID, key.KeyHash, 201, []byte(`{"transaction":{"id":"`+rec.ID+`"}}`))
 	}))
