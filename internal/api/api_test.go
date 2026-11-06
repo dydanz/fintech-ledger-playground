@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -413,5 +414,66 @@ func TestStructuredAccessLog(t *testing.T) {
 	}
 	if strings.Contains(line, "secret=abc") {
 		t.Fatal("query string must not be logged")
+	}
+}
+
+func TestTraceparentHonouredOrGenerated(t *testing.T) {
+	const valid = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	cases := []struct {
+		name, inbound, want string // want "" means a freshly generated traceparent
+	}{
+		{"valid inbound is echoed", valid, valid},
+		{"missing is generated", "", ""},
+		{"malformed is replaced", "not-a-traceparent", ""},
+		{"uppercase hex is replaced", strings.ToUpper(valid), ""},
+		{"version ff is replaced", "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", ""},
+		{"all-zero trace id is replaced", "00-00000000000000000000000000000000-00f067aa0ba902b7-01", ""},
+		{"all-zero parent id is replaced", "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01", ""},
+	}
+	pattern := regexp.MustCompile(`^00-([0-9a-f]{32})-([0-9a-f]{16})-01$`)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			req := httptest.NewRequest("GET", "/healthz", nil)
+			if tc.inbound != "" {
+				req.Header.Set("traceparent", tc.inbound)
+			}
+			w := httptest.NewRecorder()
+			h.srv.ServeHTTP(w, req)
+
+			got := w.Header().Get("traceparent")
+			m := pattern.FindStringSubmatch(got)
+			switch {
+			case m == nil:
+				t.Fatalf("response traceparent %q is not a valid sampled traceparent", got)
+			case tc.want != "" && got != tc.want:
+				t.Fatalf("response traceparent = %q, want %q", got, tc.want)
+			case tc.want == "" && got == tc.inbound:
+				t.Fatalf("invalid inbound traceparent %q was echoed", tc.inbound)
+			}
+
+			var rec map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(h.logs.Bytes()), &rec); err != nil {
+				t.Fatalf("log line is not JSON: %q", h.logs.String())
+			}
+			if rec["trace_id"] != m[1] || rec["span_id"] != m[2] {
+				t.Fatalf("log trace_id/span_id = %v/%v, header = %q", rec["trace_id"], rec["span_id"], got)
+			}
+		})
+	}
+}
+
+func TestGeneratedTraceIDsAreUnique(t *testing.T) {
+	h := newHarness(t)
+	seen := map[string]bool{}
+	for range 50 {
+		w := httptest.NewRecorder()
+		h.srv.ServeHTTP(w, httptest.NewRequest("GET", "/healthz", nil))
+		tp := w.Header().Get("traceparent")
+		if seen[tp] {
+			t.Fatalf("duplicate generated traceparent %q", tp)
+		}
+		seen[tp] = true
 	}
 }
