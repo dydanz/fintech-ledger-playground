@@ -95,7 +95,7 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 
 ## Database migrations
 
-`migrations/*.up.sql` are mounted into `/docker-entrypoint-initdb.d`, so they run automatically, in order, the **first** time Postgres starts with an empty volume. Run `make reset` to re-initialise. **An existing volume does not pick up a new migration**: after pulling `002_ledger.up.sql`, run `make reset` (this deletes local data).
+`migrations/*.up.sql` are mounted into `/docker-entrypoint-initdb.d`, so they run automatically, in order, the **first** time Postgres starts with an empty volume. Run `make reset` to re-initialise. **An existing volume does not pick up a new migration**: after pulling a new one (such as `002_ledger.up.sql` or `003_idempotency_response_bytes.up.sql`), run `make reset` (this deletes local data).
 
 `002_ledger.up.sql` creates the `ledger` schema with monthly partitions for the current month and 3 ahead. Until the ledger-worker partition job exists (P5), extend them by hand when needed: `SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4);` Up/down files follow the `golang-migrate` naming, so you can switch to a migration runner in production.
 

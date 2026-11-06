@@ -208,17 +208,18 @@ func (q ledgerQueries) lockTransaction(ctx context.Context, id string) (Transact
 	return t, wrapRead("lock transaction", err)
 }
 
-func (q ledgerQueries) updateTransaction(ctx context.Context, u TransactionUpdate) error {
-	tag, err := q.db.Exec(ctx,
-		`UPDATE ledger.transactions
+func (q ledgerQueries) updateTransaction(ctx context.Context, u TransactionUpdate) (TransactionRecord, error) {
+	t, err := scanTransaction(q.db.QueryRow(ctx,
+		`UPDATE ledger.transactions t
 		    SET status = $2, version = $3,
 		        ledger_id = COALESCE($4, ledger_id),
 		        failure_reason = $5,
 		        settled_at = CASE WHEN $6 THEN now() ELSE settled_at END,
 		        updated_at = now()
-		  WHERE id = $1`,
-		u.ID, u.Status, u.Version, nullIfEmpty(u.LedgerID), nullIfEmpty(string(u.FailureReason)), u.Settled)
-	return wrapWrite("update transaction", tag, err)
+		  WHERE id = $1
+		RETURNING `+transactionColumns,
+		u.ID, u.Status, u.Version, nullIfEmpty(u.LedgerID), nullIfEmpty(string(u.FailureReason)), u.Settled), false)
+	return t, wrapRead("update transaction", err)
 }
 
 func (q ledgerQueries) getTransaction(ctx context.Context, id string) (TransactionRecord, error) {

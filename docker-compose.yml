@@ -50,6 +50,7 @@ services:
       # Runs once, on first start with an empty data volume.
       - ./migrations/001_init.up.sql:/docker-entrypoint-initdb.d/001_init.up.sql:ro
       - ./migrations/002_ledger.up.sql:/docker-entrypoint-initdb.d/002_ledger.up.sql:ro
+      - ./migrations/003_idempotency_response_bytes.up.sql:/docker-entrypoint-initdb.d/003_idempotency_response_bytes.up.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:

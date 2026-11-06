@@ -124,7 +124,7 @@ type IdempotencyKey struct {
 	Operation      string
 	ResourceID     string
 	ResponseStatus int
-	ResponseBody   json.RawMessage
+	ResponseBody   []byte // exact bytes, replayed verbatim (bytea since migration 003)
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 }
@@ -164,10 +164,12 @@ type LedgerTx interface {
 	GetSystemLedger(ctx context.Context, code, currency string) (LedgerRecord, error)
 	LockUserLedger(ctx context.Context, accountID, currency string) (LedgerRecord, error)
 	UpdateLedgerBalance(ctx context.Context, id string, balance, lastSequence int64) error
+	ListUserLedgers(ctx context.Context, accountID string) ([]LedgerRecord, error)
 
 	InsertTransaction(ctx context.Context, t TransactionRecord) error
 	LockTransaction(ctx context.Context, id string) (TransactionRecord, error)
-	UpdateTransaction(ctx context.Context, u TransactionUpdate) error
+	// UpdateTransaction returns the updated row (without journal fields).
+	UpdateTransaction(ctx context.Context, u TransactionUpdate) (TransactionRecord, error)
 
 	// PostJournal writes both lines of a transaction in one statement.
 	PostJournal(ctx context.Context, user, counterparty JournalLine) error
@@ -294,8 +296,11 @@ func (t *pgLedgerTx) InsertTransaction(ctx context.Context, tr TransactionRecord
 func (t *pgLedgerTx) LockTransaction(ctx context.Context, id string) (TransactionRecord, error) {
 	return t.q.lockTransaction(ctx, id)
 }
-func (t *pgLedgerTx) UpdateTransaction(ctx context.Context, u TransactionUpdate) error {
+func (t *pgLedgerTx) UpdateTransaction(ctx context.Context, u TransactionUpdate) (TransactionRecord, error) {
 	return t.q.updateTransaction(ctx, u)
+}
+func (t *pgLedgerTx) ListUserLedgers(ctx context.Context, accountID string) ([]LedgerRecord, error) {
+	return t.q.listUserLedgers(ctx, accountID)
 }
 func (t *pgLedgerTx) PostJournal(ctx context.Context, user, counterparty JournalLine) error {
 	return t.q.postJournal(ctx, user, counterparty)

@@ -124,6 +124,9 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `cmd/api` `retry` |
 | `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/api` (`started`, `stopping`, `stopped`) |
 | `app.panic` | C5 | error | – | `api.Recovery` |
+| `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `service.LedgerService.OpenAccount` / `OpenLedger` / `EnsureSystemLedgers` |
+| `ledger.credit`, `ledger.debit` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `currency_unsupported`, `account_not_found`, `insufficient_funds`, `account_frozen`, `ledger_not_found`; failure: `pg_error` (Tx1 did not commit); partial: `tx2_timeout`, `tx2_error` (Tx1 committed, the transaction stays PENDING for the sweeper) | `service.LedgerService.Credit` / `Debit` (validation, Tx1) and `Process` (terminal state, once) |
+| `ledger.idempotency` | C1 | success=info (replay), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (key claim in Tx1) |
 
 ### Current gaps (existing code predates this convention)
 

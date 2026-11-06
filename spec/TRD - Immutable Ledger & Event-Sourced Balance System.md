@@ -308,7 +308,7 @@ CREATE TABLE ledger.idempotency_keys (
     operation           TEXT        NOT NULL,          -- account_open | ledger_open | credit | debit | void | freeze | unfreeze
     resource_id         UUID        NOT NULL,          -- transaction, account or ledger id the key produced
     response_status     SMALLINT,                      -- NULL while in flight
-    response_body       JSONB,
+    response_body       BYTEA,                         -- exact bytes replayed (migration 003; JSONB would reorder keys)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at          TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (client_id, key_hash)
@@ -460,6 +460,7 @@ Business failures such as `insufficient_funds` are stored and replayed like succ
 | 401 / 403 | `unauthorized` / `forbidden` | `ClientAuth` / `Auth` | no |
 | 404 | `account_not_found`, `ledger_not_found`, `transaction_not_found` | Lookups | `ledger_not_found` does, at processing time |
 | 409 | `request_in_progress` | §6.4 | no |
+| 409 | `ledger_exists` | Opening a second ledger in a currency | no |
 | 422 | `insufficient_funds` | Debit or void would breach the floor | yes |
 | 422 | `account_frozen` | Debit on a frozen account | yes |
 | 422 | `not_voidable` | Original isn't SETTLED, already voided, or is itself a VOID | yes |
@@ -697,8 +698,8 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `event` | Class | Level by outcome | Allowed `reason` values | Emitted in |
 | :--- | :--- | :--- | :--- | :--- |
 | `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.ClientAuth` |
-| `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `currency_unsupported`, `pg_error` | `LedgerService.Open*` |
-| `ledger.credit` / `ledger.debit` / `ledger.void` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `insufficient_funds`, `account_frozen`, `not_voidable`, `ledger_not_found`, `account_not_found`, `pg_error`, `processing_timeout` | `LedgerService.Process` (one event per terminal state) |
+| `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `LedgerService.Open*`, `EnsureSystemLedgers` |
+| `ledger.credit` / `ledger.debit` / `ledger.void` | C2 | success=info, denied=warn, failure=error, partial=error | `invalid_input`, `currency_unsupported`, `insufficient_funds`, `account_frozen`, `not_voidable`, `ledger_not_found`, `account_not_found`, `pg_error`, `processing_timeout`; partial: `tx2_timeout`, `tx2_error` (Tx1 committed, Tx2 did not: 202, left to the sweeper) | `LedgerService.Process` (one event per terminal state); validation and Tx1 outcomes in `Credit`/`Debit` |
 | `ledger.idempotency` | C1 | success=info (replay), denied=warn | `key_reused`, `in_progress` | `LedgerService` (before Tx1) |
 | `ledger.freeze` / `ledger.unfreeze` | C1 | success=info, failure=error | `pg_error` | `LedgerService.Freeze/Unfreeze` (includes `actor`, `rule`) |
 | `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout` | sweeper |
@@ -757,7 +758,8 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `ledger-worker` | build with `CMD=ledger-worker` | — |
 | `fraud-engine` | build with `CMD=fraud-engine` | — |
 
-- Postgres gains a mount of `./migrations/002_ledger.up.sql` in `docker-entrypoint-initdb.d/`.
+- Postgres gains mounts of `./migrations/002_ledger.up.sql` and `003_idempotency_response_bytes.up.sql` in `docker-entrypoint-initdb.d/`.
+- **System ledgers for every configured currency.** Migration 002 seeds `topup_clearing` and `settlement` for `IDR` only. `LedgerService.EnsureSystemLedgers` creates any missing ones for `LEDGER_CURRENCIES` at `ledger-api` startup; it's idempotent and safe across replicas.
 - **Caveat.** Init scripts run only on an empty volume, so existing environments need `make reset`. Adopting a migration runner (e.g. `golang-migrate` as a one-shot service) is recommended before a third migration; tracked in §16 Q11.
 - New Makefile targets: `test-integration`, `load` (k6), `kafka-topics`, `logs-ledger`.
 
