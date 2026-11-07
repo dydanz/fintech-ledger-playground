@@ -70,3 +70,20 @@ func TestLoadLedgerDefaultsAndErrors(t *testing.T) {
 		}
 	}
 }
+
+// TRD §16 Q6: only LEDGER_UNFREEZE_CLIENTS (default ops) may hold unfreeze.
+func TestUnfreezeGrantIsRestricted(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("LEDGER_CLIENTS", "ops:"+hashA+":freeze,unfreeze;fraud-engine:"+hashB+":freeze")
+	if _, err := config.LoadLedger(); err != nil {
+		t.Fatalf("ops with unfreeze rejected: %v", err)
+	}
+	t.Setenv("LEDGER_CLIENTS", "ops:"+hashA+":freeze;fraud-engine:"+hashB+":freeze,unfreeze")
+	if _, err := config.LoadLedger(); err == nil || !strings.Contains(err.Error(), "fraud-engine may not be granted unfreeze") {
+		t.Fatalf("fraud-engine with unfreeze: err = %v", err)
+	}
+	t.Setenv("LEDGER_UNFREEZE_CLIENTS", "ops,fraud-engine")
+	if _, err := config.LoadLedger(); err != nil {
+		t.Fatalf("explicitly allowed: %v", err)
+	}
+}

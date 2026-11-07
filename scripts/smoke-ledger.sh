@@ -3,7 +3,7 @@
 # register a user on auth-api -> open account -> credit -> debit ->
 # insufficient funds -> idempotent replay -> key reuse -> auth rejections ->
 # the user's own balance and history, read with an auth-api login token ->
-# void of the debit.
+# void of the debit -> freeze blocks debits, credits still settle -> unfreeze.
 set -euo pipefail
 
 AUTH="${AUTH_URL:-http://localhost:8080}"
@@ -119,5 +119,23 @@ code=$(req "$LEDGER/internal/v1/transactions/$DEBIT_ID" -H "Authorization: Beare
 expect 200 "$code" "read the voided debit"
 [[ "$(json status)" == "VOIDED" ]] || { echo "FAIL original status: $(cat "$BODY")"; exit 1; }
 echo "ok   original is VOIDED"
+
+code=$(post "$OPS_TOKEN" "freeze-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/freeze" '{"reason":"smoke","rule":"debit_volume"}')
+expect 200 "$code" "freeze the account"
+[[ "$(json status)" == "FROZEN" ]] || { echo "FAIL freeze status: $(cat "$BODY")"; exit 1; }
+
+code=$(post "$PAYMENTS_TOKEN" "frozen-debit-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/debits" '{"amount":1,"currency":"IDR"}')
+expect 422 "$code" "debit on a frozen account"
+[[ "$(json code)" == "account_frozen" ]] || { echo "FAIL error code: $(cat "$BODY")"; exit 1; }
+
+code=$(post "$PAYMENTS_TOKEN" "frozen-credit-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/credits" '{"amount":1,"currency":"IDR"}')
+expect 201 "$code" "credit on a frozen account"
+
+code=$(post "$PAYMENTS_TOKEN" "unfreeze-pay-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/unfreeze" '{"reason":"smoke"}')
+expect 403 "$code" "payments may not unfreeze"
+
+code=$(post "$OPS_TOKEN" "unfreeze-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/unfreeze" '{"reason":"smoke"}')
+expect 200 "$code" "unfreeze the account"
+[[ "$(json status)" == "ACTIVE" ]] || { echo "FAIL unfreeze status: $(cat "$BODY")"; exit 1; }
 
 echo "all ledger smoke checks passed"
