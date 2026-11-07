@@ -81,6 +81,7 @@ log.ErrorContext(ctx, "session deleted but audit revoke failed",
   ```logql
   sum by (reason) (count_over_time({service="auth-api", level="error"} | json | event="audit.revoke" [5m]))
   ```
+- Alert rules live in `deploy/grafana/provisioning/alerting/ledger.yaml` (TRD §11.3). A new page-worthy condition gets a rule there; check it with `make check-alerts`.
 - A new **C1** event MUST be countable by `outcome`, so denial and failure rates can be graphed:
   ```logql
   sum by (outcome) (rate({service="auth-api"} | json | event="auth.login" [1m]))
