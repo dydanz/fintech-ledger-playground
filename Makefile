@@ -1,4 +1,4 @@
-.PHONY: up down reset logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger psql
+.PHONY: up down reset logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
 up:
 	docker compose up -d --build
@@ -17,6 +17,9 @@ logs-ledger:
 
 logs-worker:
 	docker compose logs -f ledger-worker
+
+logs-fraud:
+	docker compose logs -f fraud-engine
 
 load: ## k6 credits at RATE/s for DURATION; prints the max outbox lag (needs make up)
 	./scripts/load/outbox-lag.sh 60 & docker compose --profile load run --rm k6 run /scripts/ledger-credits.js; wait
@@ -45,6 +48,9 @@ smoke:
 
 smoke-ledger: ## needs api and ledger-api running (make up)
 	./scripts/smoke-ledger.sh
+
+smoke-fraud: ## 4 top-ups freeze an account within 2 s (needs make up)
+	./scripts/smoke-fraud.sh
 
 psql:
 	docker compose exec postgres psql -U auth -d auth

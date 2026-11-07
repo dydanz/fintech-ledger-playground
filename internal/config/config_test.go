@@ -127,3 +127,27 @@ func TestParseCurrencyLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadFraud(t *testing.T) {
+	t.Setenv("FRAUD_CLIENT_TOKEN", "tok")
+	cfg, err := config.LoadFraud()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServiceName != "fraud-engine" || cfg.Group != "fraud-engine" || cfg.TopupMax != 3 || cfg.TopupWindow != 5*time.Minute ||
+		cfg.DebitWindow != time.Hour || cfg.DebitMaxCount != 30 || cfg.DebitLimits["IDR"] != 50_000_000 || cfg.FreezeRetry != 30*time.Second {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+	t.Setenv("FRAUD_CLIENT_TOKEN", "")
+	t.Setenv("FRAUD_TOPUP_MAX", "0")
+	t.Setenv("FRAUD_DEBIT_LIMITS", "IDR:x")
+	_, err = config.LoadFraud()
+	for _, want := range []string{"FRAUD_CLIENT_TOKEN", "FRAUD_TOPUP_MAX", "FRAUD_DEBIT_LIMITS"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error %v does not mention %s", err, want)
+		}
+	}
+	if err != nil && strings.Contains(err.Error(), "tok") {
+		t.Error("error leaks the token")
+	}
+}

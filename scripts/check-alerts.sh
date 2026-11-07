@@ -12,7 +12,7 @@ GRAFANA="${GRAFANA_URL:-http://localhost:3000}"
 LOKI="${LOKI_URL:-http://localhost:3100}"
 AUTH="${GRAFANA_ADMIN_USER:-admin}:${GRAFANA_ADMIN_PASSWORD:-admin}"
 DASHBOARD="$(dirname "$0")/../deploy/grafana/dashboards/ledger.json"
-RULES=(ledger-success-ratio ledger-outbox-lag ledger-stuck-pending)
+RULES=(ledger-success-ratio ledger-outbox-lag ledger-stuck-pending ledger-fraud-freeze-failing)
 
 fail() { echo "FAIL $*"; exit 1; }
 
@@ -97,15 +97,17 @@ worker.append(line(level="warn", service="ledger-worker", message="outbox laggin
                    outcome="success", pending=42, lag_ms=9000))
 worker.append(line(level="warn", service="ledger-worker", message="stuck transaction recovered", event="ledger.recover",
                    outcome="success", reason="processing_timeout", status="FAILED"))
+fraud = [line(level="error", service="fraud-engine", message="fraud freeze still failing, retrying", event="fraud.decision",
+              outcome="failure", reason="freeze_call_failed", rule="topup_velocity")]
 streams = []
-for svc, lines in (("ledger-api", api), ("ledger-worker", worker)):
+for svc, lines in (("ledger-api", api), ("ledger-worker", worker), ("fraud-engine", fraud)):
     for i, l in enumerate(lines):
         streams.append({"stream": {"service": svc, "level": json.loads(l)["level"], "synthetic": "true"},
                         "values": [[str(now + i), l]]})
 req = urllib.request.Request(f"{loki}/loki/api/v1/push", json.dumps({"streams": streams}).encode(),
                              {"Content-Type": "application/json"})
 urllib.request.urlopen(req, timeout=10)
-print(f"ok   pushed {len(api) + len(worker)} synthetic lines")
+print(f"ok   pushed {len(api) + len(worker) + len(fraud)} synthetic lines")
 PY
 
 wait_states "inactive|normal|missing|nodata" 150 || fail "alerts did not trip within 150s: $states"
