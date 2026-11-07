@@ -1,4 +1,4 @@
-.PHONY: up down reset logs logs-ledger test test-integration vet smoke smoke-ledger psql
+.PHONY: up down reset logs logs-ledger logs-worker test test-integration vet smoke smoke-ledger psql
 
 up:
 	docker compose up -d --build
@@ -14,6 +14,9 @@ logs:
 
 logs-ledger:
 	docker compose logs -f ledger-api
+
+logs-worker:
+	docker compose logs -f ledger-worker
 
 test:
 	go test -race -count=1 ./...

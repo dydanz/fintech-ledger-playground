@@ -87,3 +87,26 @@ func TestUnfreezeGrantIsRestricted(t *testing.T) {
 		t.Fatalf("explicitly allowed: %v", err)
 	}
 }
+
+func TestLoadWorkerDefaultsAndErrors(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServiceName != "ledger-worker" || cfg.HTTPAddr != ":8082" || cfg.SweepInterval != 5*time.Second ||
+		cfg.SweepAfter != 5*time.Second || cfg.PendingMaxAge != 15*time.Minute || cfg.PurgeInterval != time.Minute ||
+		cfg.ProcessTimeout != 2*time.Second || strings.Join(cfg.Currencies, ",") != "IDR" {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+	// The sweeper must not take over a Tx2 the request path may still finish.
+	t.Setenv("LEDGER_SWEEP_AFTER", "1s")
+	if _, err := config.LoadWorker(); err == nil || !strings.Contains(err.Error(), "LEDGER_SWEEP_AFTER") {
+		t.Fatalf("sweep after < process timeout: %v", err)
+	}
+	t.Setenv("LEDGER_SWEEP_AFTER", "")
+	t.Setenv("LEDGER_SWEEP_INTERVAL", "0s")
+	if _, err := config.LoadWorker(); err == nil {
+		t.Fatal("zero sweep interval accepted")
+	}
+}

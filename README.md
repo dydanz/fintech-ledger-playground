@@ -13,6 +13,7 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 | :--- | :--- |
 | API | http://localhost:8080 |
 | ledger-api | http://localhost:8081, bound to 127.0.0.1 only |
+| ledger-worker | no published port; background jobs (sweeper, idempotency purge) |
 | Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview** |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |
@@ -143,7 +144,7 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 
 ## Database migrations
 
-`migrations/*.up.sql` are mounted into `/docker-entrypoint-initdb.d`, so they run automatically, in order, the **first** time Postgres starts with an empty volume. Run `make reset` to re-initialise. **An existing volume does not pick up a new migration**: after pulling a new one (such as `002_ledger.up.sql` or `003_idempotency_response_bytes.up.sql`), run `make reset` (this deletes local data).
+`migrations/*.up.sql` are mounted into `/docker-entrypoint-initdb.d`, so they run automatically, in order, the **first** time Postgres starts with an empty volume. Run `make reset` to re-initialise. **An existing volume does not pick up a new migration**: after pulling a new one (such as `002_ledger.up.sql`, `003_idempotency_response_bytes.up.sql` or `004_idempotency_resource_index.up.sql`), run `make reset` (this deletes local data).
 
 `002_ledger.up.sql` creates the `ledger` schema with monthly partitions for the current month and 3 ahead. Until the ledger-worker partition job exists (P5), extend them by hand when needed: `SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4);` Up/down files follow the `golang-migrate` naming, so you can switch to a migration runner in production.
 
@@ -152,6 +153,7 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 ```
 cmd/api/              auth-api entrypoint
 cmd/ledger-api/       ledger-api entrypoint
+cmd/ledger-worker/    ledger-worker entrypoint (sweeper, idempotency purge)
 internal/startup/     dependency retry, graceful serve, container healthcheck (shared by cmd/*)
 internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)
 internal/idempotency/ Idempotency-Key hashing, request fingerprints, Redis replay cache

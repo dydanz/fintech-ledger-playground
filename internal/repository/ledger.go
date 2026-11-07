@@ -259,6 +259,28 @@ func (r *LedgerRepo) ListTransactions(ctx context.Context, q TransactionQuery) (
 	return r.q().listTransactions(ctx, q)
 }
 
+// StuckTransaction is a PENDING transaction for the sweeper, with the
+// idempotency key whose stored response its Tx2 completes. ClientID and
+// KeyHash are empty if the key is gone.
+type StuckTransaction struct {
+	ID        string
+	AccountID string
+	CreatedAt time.Time
+	ClientID  string
+	KeyHash   string
+}
+
+// ListStuckTransactions returns up to limit PENDING transactions created
+// before olderThan, oldest first (spec/TRD §7.5).
+func (r *LedgerRepo) ListStuckTransactions(ctx context.Context, olderThan time.Time, limit int) ([]StuckTransaction, error) {
+	return r.q().listStuckTransactions(ctx, olderThan, limit)
+}
+
+// PurgeIdempotencyKeys deletes up to limit expired keys and reports how many.
+func (r *LedgerRepo) PurgeIdempotencyKeys(ctx context.Context, limit int) (int64, error) {
+	return r.q().purgeIdempotencyKeys(ctx, limit)
+}
+
 // ListStreamEvents returns a stream's events in version order, for folding.
 func (r *LedgerRepo) ListStreamEvents(ctx context.Context, streamID string) ([]ledger.Event, error) {
 	return r.q().listStreamEvents(ctx, streamID)

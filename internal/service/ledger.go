@@ -677,21 +677,38 @@ func (s *LedgerService) Void(ctx context.Context, cmd VoidCommand) (Response, er
 type ProcessInput struct {
 	TransactionID string
 	ClientID      string
-	KeyHash       string
+	KeyHash       string // "" if the key is gone (the sweeper still completes the transaction)
 	RequestID     string
+	// Expire fails the transaction with processing_timeout instead of
+	// deciding it: the sweeper's last resort past LEDGER_PENDING_MAX_AGE.
+	Expire bool
 }
 
 // Process is Tx2 (TRD §7.1), the single implementation shared by the request
 // path and the P2 sweeper. Lock order: transaction → account → ledger. It
 // logs the terminal outcome after commit, exactly once.
 func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response, error) {
+	resp, _, err := s.process(ctx, in)
+	return resp, err
+}
+
+// process is Process, also returning the record it moved to a terminal
+// state; final.ID is empty when the transaction was already terminal.
+func (s *LedgerService) process(ctx context.Context, in ProcessInput) (resp Response, final repository.TransactionRecord, err error) {
 	var (
-		resp    Response
 		done    repository.IdempotencyKey
-		final   repository.TransactionRecord
 		already bool
 	)
-	err := s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
+	// finish renders the terminal response and stores it with the key.
+	finish := func(tx repository.LedgerTx) error {
+		var err error
+		if resp, err = renderTransaction(final, in.RequestID); err != nil || in.KeyHash == "" {
+			return err
+		}
+		done, err = tx.CompleteIdempotencyKey(ctx, in.ClientID, in.KeyHash, resp.Status, resp.Body)
+		return err
+	}
+	err = s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
 		rec, err := tx.LockTransaction(ctx, in.TransactionID)
 		if err != nil {
 			return err
@@ -701,6 +718,21 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 			already, final = true, rec
 			resp, err = renderTransaction(rec, in.RequestID)
 			return err
+		}
+		if in.Expire {
+			// Still through PROCESSING (TRD §7.5); no balance is read or changed.
+			for i, p := range []ledger.Payload{ledger.TransactionProcessing{},
+				ledger.TransactionFailed{Reason: ledger.ReasonProcessingTimeout}} {
+				if _, err := tx.AppendEvent(ctx, ledger.Event{StreamID: rec.ID, StreamVersion: rec.Version + int64(i) + 1,
+					AccountID: rec.AccountID, Payload: p, TraceID: rec.TraceID}, ""); err != nil {
+					return err
+				}
+			}
+			if final, err = tx.UpdateTransaction(ctx, repository.TransactionUpdate{ID: rec.ID, Status: ledger.StatusFailed,
+				FailureReason: ledger.ReasonProcessingTimeout, Version: rec.Version + 2}); err != nil {
+				return err
+			}
+			return finish(tx)
 		}
 		acct, err := tx.LockAccount(ctx, rec.AccountID, repository.LockShare)
 		if err != nil {
@@ -783,20 +815,17 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 		if d.Settle {
 			final.LedgerSequence, final.BalanceAfter = l.LastSequence+1, d.BalanceAfter
 		}
-		if resp, err = renderTransaction(final, in.RequestID); err != nil {
-			return err
-		}
-		done, err = tx.CompleteIdempotencyKey(ctx, in.ClientID, in.KeyHash, resp.Status, resp.Body)
-		return err
+		return finish(tx)
 	})
 	if err != nil {
-		return Response{}, err
+		return Response{}, repository.TransactionRecord{}, err
 	}
-	if !already {
-		s.remember(ctx, done)
-		logTerminal(ctx, final)
+	if already {
+		return resp, repository.TransactionRecord{}, nil
 	}
-	return resp, nil
+	s.remember(ctx, done)
+	logTerminal(ctx, final)
+	return resp, final, nil
 }
 
 func logTerminal(ctx context.Context, t repository.TransactionRecord) {
@@ -810,6 +839,11 @@ func logTerminal(ctx context.Context, t repository.TransactionRecord) {
 	if t.Status == ledger.StatusSettled {
 		log.InfoContext(ctx, verb(t.Type)+" settled", append(attrs, "outcome", "success",
 			"ledger_sequence", t.LedgerSequence, "balance_after", t.BalanceAfter)...)
+		return
+	}
+	if t.FailureReason == ledger.ReasonProcessingTimeout {
+		// Ours, not the caller's: the sweeper gave up on it.
+		log.ErrorContext(ctx, verb(t.Type)+" failed", append(attrs, "outcome", "failure", "reason", string(t.FailureReason))...)
 		return
 	}
 	log.WarnContext(ctx, verb(t.Type)+" failed", append(attrs, "outcome", "denied", "reason", string(t.FailureReason))...)

@@ -334,3 +334,15 @@ func TestDownMigrationRemovesSchema(t *testing.T) {
 		t.Fatal("ledger schema still present after down migration")
 	}
 }
+
+func TestIdempotencyResourceIndex(t *testing.T) {
+	f := newFixture(t)
+	const q = `SELECT count(*) FROM pg_indexes WHERE schemaname = 'ledger' AND indexname = 'idempotency_resource_idx'`
+	if n := f.count(q); n != 1 {
+		t.Fatal("migration 004 index missing")
+	}
+	pgtest.ExecMigration(t, f.pool, "004_idempotency_resource_index.down.sql")
+	if n := f.count(q); n != 0 {
+		t.Fatal("index still present after 004 down")
+	}
+}
