@@ -111,7 +111,7 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Idempotency: replays and conflicts",
+      "title": "Idempotency: replays (by source) and conflicts",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -129,8 +129,8 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (outcome, reason) (count_over_time({service=\"ledger-api\"} | json | event=\"ledger.idempotency\" [5m]))",
-          "legendFormat": "{{outcome}} {{reason}}"
+          "expr": "sum by (outcome, reason, source) (count_over_time({service=\"ledger-api\"} | json | event=\"ledger.idempotency\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}{{source}}"
         }
       ],
       "fieldConfig": {
@@ -264,13 +264,45 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=\"ledger-api\"} | json | event=~\"dependency\\\\.connect|app\\\\..+\""
+          "expr": "{service=\"ledger-api\"} | json | event=~\"dependency\\\\.(connect|call)|app\\\\..+\""
         }
       ],
       "options": {
         "showTime": true,
         "wrapLogMessage": true,
         "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Idempotency cache unavailable: Redis calls falling back to Postgres",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (operation, reason) (count_over_time({service=\"ledger-api\"} | json | event=\"dependency.call\" | dependency=\"redis\" [5m]))",
+          "legendFormat": "{{operation}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
       }
     }
   ]

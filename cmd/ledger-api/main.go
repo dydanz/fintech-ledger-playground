@@ -17,6 +17,7 @@ import (
 
 	"auth-api/internal/api"
 	"auth-api/internal/config"
+	"auth-api/internal/idempotency"
 	"auth-api/internal/logger"
 	"auth-api/internal/repository"
 	"auth-api/internal/service"
@@ -56,9 +57,10 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 	}
 	defer db.Close()
 
-	// Only the user routes need Redis (auth-api's sessions). Startup waits for
-	// it, but readiness doesn't include it: a later Redis outage fails just the
-	// user routes (503 from Auth) and leaves the internal write path serving.
+	// Redis holds auth-api's sessions (user routes) and the idempotency cache.
+	// Startup waits for it, but readiness doesn't include it: a later outage
+	// fails just the user routes (503 from Auth), and writes fall back to
+	// Postgres-only idempotency.
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, DB: cfg.RedisDB})
 	defer rdb.Close()
 	if err := startup.Retry(ctx, log, "redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() }); err != nil {
@@ -71,6 +73,7 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 		ProcessTimeout:   cfg.ProcessTimeout,
 		IdempotencyTTL:   cfg.IdempotencyTTL,
 		OverdraftClients: cfg.OverdraftClients,
+		Cache:            idempotency.NewRedisCache(rdb),
 	})
 	if err != nil {
 		return err

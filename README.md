@@ -34,7 +34,7 @@ Errors are always `{"error":{"code","message","request_id"}}`.
 
 ### Internal routes
 
-Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_CLIENTS` maps each `client_id` to the SHA-256 of its token and the operations it may perform (`account_open`, `credit`, `debit`, `void`, `freeze`, `unfreeze`, `read`). Every mutating call needs an `Idempotency-Key` header; a retry with the same key gets the original response back byte for byte (`Idempotent-Replayed: true`), a different request with the same key gets `422 idempotency_key_reused`, and one still in flight gets `409 request_in_progress`.
+Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_CLIENTS` maps each `client_id` to the SHA-256 of its token and the operations it may perform (`account_open`, `credit`, `debit`, `void`, `freeze`, `unfreeze`, `read`). Every mutating call needs an `Idempotency-Key` header; a retry with the same key gets the original response back byte for byte (`Idempotent-Replayed: true`), a different request with the same key gets `422 idempotency_key_reused`, and one still in flight gets `409 request_in_progress`. Completed responses are also cached in Redis (`idem:ledger:<client_id>:<sha256(key)>`, expiring with the Postgres row), so most retries are answered without touching Postgres. Postgres stays the authority: with Redis down, writes and replays still work, and each failed Redis call logs a `dependency.call` warning.
 
 | Method | Path | Operation | Success |
 | :--- | :--- | :--- | :--- |
@@ -55,7 +55,7 @@ End users call these with the `access_token` from auth-api's `/api/v1/auth/login
 | GET | `/api/v1/ledger/transactions?currency=&limit=&cursor=` | `200 {"transactions":[…],"next_cursor"?}`, newest first. `limit` is 1–100 (default 20); pass `next_cursor` back as `cursor` for the next page, and its absence means the last page |
 | GET | `/api/v1/ledger/transactions/:transaction_id` | `200` transaction, or `404 transaction_not_found` if it isn't the caller's |
 
-Pages are keyset-paginated on `(created_at, id)`, so a transaction written while you page doesn't shift or repeat later pages. Redis isn't part of ledger-api's `/readyz`: if Redis goes down, the user routes return `503` and the internal routes keep serving.
+Pages are keyset-paginated on `(created_at, id)`, so a transaction written while you page doesn't shift or repeat later pages. Redis isn't part of ledger-api's `/readyz`: if Redis goes down, the user routes return `503` and the internal routes keep serving on Postgres-only idempotency.
 
 Amounts are integers in the currency's minor unit (IDR has none). The dev tokens in `.env.example` are `dev-onboarding-token`, `dev-payments-token` and `dev-ops-token`; replace them anywhere but your laptop. Void, freeze, the Kafka relay and the fraud engine arrive in later phases (see the development plan in `spec/`).
 
@@ -150,7 +150,7 @@ cmd/api/              auth-api entrypoint
 cmd/ledger-api/       ledger-api entrypoint
 internal/startup/     dependency retry, graceful serve, container healthcheck (shared by cmd/*)
 internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)
-internal/idempotency/ Idempotency-Key hashing and request fingerprints
+internal/idempotency/ Idempotency-Key hashing, request fingerprints, Redis replay cache
 internal/outbox/      Kafka envelope written to ledger.outbox
 internal/api/         router, middleware (request ctx, access log, recovery, auth), handlers
 internal/service/     auth, profile and ledger business logic
