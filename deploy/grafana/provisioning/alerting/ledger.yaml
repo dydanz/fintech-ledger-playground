@@ -1,0 +1,106 @@
+# Ledger alert rules (spec/TRD §11.3), evaluated by Grafana against Loki.
+# Reconcile, partition and fraud alerts land with their phases (P4, P5).
+# Severity: page = act now; ticket = next working day. No contact point is
+# configured here: route `severity` in your environment's notification policy.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: ledger
+    folder: ledger
+    interval: 30s
+    rules:
+      - uid: ledger-success-ratio
+        title: Ledger success ratio below 99.99%
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              # 1 − (5xx on mutating /internal/v1 requests + FAILED processing_timeout) / valid
+              # mutating requests (not 400/401/403), over 5 m. Business failures count as successes.
+              expr: >-
+                1 - (
+                  (sum(count_over_time({service="ledger-api"} | json | message="http_request" | method="POST" | route=~"/internal/v1/.*" | status >= 500 [5m])) or vector(0))
+                  + (sum(count_over_time({service="ledger-worker"} | json | event="ledger.recover" | reason="processing_timeout" [5m])) or vector(0))
+                ) / sum(count_over_time({service="ledger-api"} | json | message="http_request" | method="POST" | route=~"/internal/v1/.*" | status != 400 | status != 401 | status != 403 [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: lt, params: [0.9999]}
+        noDataState: OK # no traffic is not a breach
+        execErrState: Error
+        for: 0s
+        labels: {severity: page, service: ledger-api}
+        annotations:
+          summary: 'Success ratio {{ if and $values.A $values.A.Value }}{{ humanizePercentage $values.A.Value }}{{ else }}unknown{{ end }} over 5 minutes (NFR-5 target 99.99%).'
+          description: >-
+            System failures (5xx on internal writes, or transactions failed with processing_timeout) exceeded
+            0.01% of valid writes. Check the "Errors" and "Recent errors" panels on the ledger dashboard.
+
+      - uid: ledger-outbox-lag
+        title: Ledger outbox lag above 5 s
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 120, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: max(max_over_time({service="ledger-worker"} | json | event="outbox.lag" | unwrap lag_ms [2m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [5000]}
+        # outbox.lag is the relay's heartbeat (every 30 s): none for 2 m means
+        # no relay is running, which is itself an outage of the event feed.
+        noDataState: Alerting
+        execErrState: Error
+        for: 2m
+        labels: {severity: page, service: ledger-worker}
+        annotations:
+          summary: '{{ if and $values.A $values.A.Value }}Oldest unpublished outbox row is {{ humanize $values.A.Value }} ms old.{{ else }}No outbox.lag heartbeat for 2 minutes: the relay is not running or not reporting.{{ end }}'
+          description: >-
+            Events are not reaching Kafka (ledger.events.v1). Check outbox.publish failures (Kafka reachable?)
+            and app.leader for the outbox_relay job in ledger-worker.
+
+      - uid: ledger-stuck-pending
+        title: Ledger transactions failed with processing_timeout
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="ledger-worker"} | json | event="ledger.recover" | reason="processing_timeout" [10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: page, service: ledger-worker}
+        annotations:
+          summary: '{{ if and $values.A $values.A.Value }}{{ $values.A.Value }}{{ else }}Some{{ end }} transaction(s) stayed PENDING past LEDGER_PENDING_MAX_AGE and were failed.'
+          description: >-
+            Tx2 could not complete for at least LEDGER_PENDING_MAX_AGE. Look at ledger.recover failures and
+            lock timeouts; clients get a 500 processing_timeout on retry.

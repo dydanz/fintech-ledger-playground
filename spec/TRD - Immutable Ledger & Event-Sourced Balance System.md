@@ -755,7 +755,7 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 
 ### 11.2 Dashboard `deploy/grafana/dashboards/ledger.json`
 
-Panels:
+Panels (complete as of P3.3, in rows Overview, Write path, Account controls and recovery, Event streaming, Logs; plus an alert list):
 - TPS by `event` and `outcome`
 - Success ratio (NFR-5)
 - Denials by `reason`
@@ -773,7 +773,18 @@ sum by (outcome) (rate({service="ledger-api"} | json | event=~"ledger\\.(credit|
 
 ### 11.3 Alerts
 
-The repo has no alert provisioning yet. P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`.
+P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`: folder `ledger`, group `ledger`, evaluated every 30 s.
+- **Severity.** Rules carry `severity` (`page` or `ticket`) and `service` labels. No contact point is provisioned; route on `severity` in each environment's notification policy.
+- **Implemented in P3.3:** success ratio, outbox lag and stuck PENDING.
+  - **Success ratio:** the §11 formula over ledger-api access logs (POST `/internal/v1/*`; valid means not 400, 401 or 403) plus ledger-worker `processing_timeout`. No traffic means `OK`.
+  - **Outbox lag:** `max_over_time(lag_ms)`. `outbox.lag` doubles as the relay's heartbeat, so no data for 2 m is `Alerting`.
+  - **Stuck PENDING:** any `ledger.recover` with `processing_timeout`.
+  - **Later phases:** the reconcile, partition and fraud rules land with their own phases.
+- **Verification.** `make check-alerts` (`scripts/check-alerts.sh`) checks four things:
+  - the rules are provisioned;
+  - every dashboard query runs on Loki;
+  - every rule is quiet on a healthy stack;
+  - each rule goes Pending/Firing on synthetic log lines.
 
 | Alert | Condition | Severity |
 | :--- | :--- | :--- |
