@@ -517,6 +517,12 @@ Redis SET idem:… (response, PX = remaining TTL)  -- best effort, after commit
 respond 201 / 422
 ```
 
+- **Idempotency cache (implemented in P2.1).**
+  - Redis holds only completed responses: `idem:ledger:<client_id>:<key_hash>` → fingerprint, operation, status and the exact body bytes.
+  - Each entry expires at its `idempotency_keys.expires_at`. `CompleteIdempotencyKey` returns the row, so the TTL is computed from that.
+  - A hit whose fingerprint or operation differs is ignored, and Postgres decides (422).
+  - A 202 PENDING response is never cached. `Process` caches the response once the transaction is terminal, whether the request path or the sweeper ran it.
+  - Every Redis call is bounded at 100 ms. A failure logs `dependency.call` at warn, and the request carries on with Postgres alone.
 - **Lock order** is always `transactions → accounts → ledgers`. For a void it is the void transaction, then the account, then the ledger, then the original transaction. Every path follows this order, so the design can't deadlock. A transaction touches exactly one user ledger, and system ledgers are never locked.
 - **Strict consistency (NFR).** Concurrent debits on the same ledger serialize on the `ledgers` row lock. Each one sees the committed balance of the previous one, so double-spending is impossible. The `ledgers_no_negative` CHECK is the last line of defence.
 - **Freezes take effect immediately (FR-09).** Freeze takes `accounts FOR UPDATE`, which conflicts with the `FOR SHARE` every Tx2 holds. Once the freeze commits, every later debit sees `FROZEN`. A debit already holding the lock finishes first, which is the correct serial order. Credits keep settling, and voids are allowed on frozen accounts (§16 Q3).
@@ -705,7 +711,8 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.ClientAuth` |
 | `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `LedgerService.Open*`, `EnsureSystemLedgers` |
 | `ledger.credit` / `ledger.debit` / `ledger.void` | C2 | success=info, denied=warn, failure=error, partial=error | `invalid_input`, `currency_unsupported`, `insufficient_funds`, `account_frozen`, `not_voidable`, `ledger_not_found`, `account_not_found`, `pg_error`, `processing_timeout`; partial: `tx2_timeout`, `tx2_error` (Tx1 committed, Tx2 did not: 202, left to the sweeper) | `LedgerService.Process` (one event per terminal state); validation and Tx1 outcomes in `Credit`/`Debit` |
-| `ledger.idempotency` | C1 | success=info (replay), denied=warn | `key_reused`, `in_progress` | `LedgerService` (before Tx1) |
+| `ledger.idempotency` | C1 | success=info (replay; `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `LedgerService` (Redis fast path, or the claim in Tx1) |
+| `dependency.call` | C4 | failure=warn | `timeout`, `refused`, `unknown` | `LedgerService` idempotency cache (`dependency=redis`, `operation`); the request continues on Postgres |
 | `ledger.freeze` / `ledger.unfreeze` | C1 | success=info, failure=error | `pg_error` | `LedgerService.Freeze/Unfreeze` (includes `actor`, `rule`) |
 | `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout` | sweeper |
 | `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift` | reconciler |

@@ -235,7 +235,11 @@ func TestCreditTx1Tx2(t *testing.T) {
 		if updated.Status != ledger.StatusSettled || updated.SettledAt == nil || updated.Version != 3 {
 			t.Fatalf("UpdateTransaction returned %+v", updated)
 		}
-		return tx.CompleteIdempotencyKey(e.ctx, key.ClientID, key.KeyHash, 201, []byte(`{"transaction":{"id":"`+rec.ID+`"}}`))
+		done, err := tx.CompleteIdempotencyKey(e.ctx, key.ClientID, key.KeyHash, 201, []byte(`{"transaction":{"id":"`+rec.ID+`"}}`))
+		if err == nil && (done.Fingerprint != key.Fingerprint || done.Operation != key.Operation || !done.ExpiresAt.Equal(key.ExpiresAt.Truncate(time.Microsecond))) {
+			t.Fatalf("CompleteIdempotencyKey returned %+v, want the claimed row %+v", done, key)
+		}
+		return err
 	}))
 
 	got, err := e.repo.GetTransaction(e.ctx, rec.ID)
@@ -374,7 +378,8 @@ func TestIdempotencyKeyLifecycle(t *testing.T) {
 	}
 	complete := func() error {
 		return e.inTx(func(tx repository.LedgerTx) error {
-			return tx.CompleteIdempotencyKey(e.ctx, k.ClientID, k.KeyHash, 422, []byte(`{"error":{}}`))
+			_, err := tx.CompleteIdempotencyKey(e.ctx, k.ClientID, k.KeyHash, 422, []byte(`{"error":{}}`))
+			return err
 		})
 	}
 
