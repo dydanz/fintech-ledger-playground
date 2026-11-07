@@ -104,6 +104,11 @@ func (q ledgerQueries) insertLedger(ctx context.Context, l LedgerRecord) error {
 	return fmt.Errorf("insert ledger: %w", err)
 }
 
+func (q ledgerQueries) getLedger(ctx context.Context, id string) (LedgerRecord, error) {
+	l, err := scanLedger(q.db.QueryRow(ctx, `SELECT `+ledgerColumns+` FROM ledger.ledgers WHERE id = $1`, id))
+	return l, wrapRead("get ledger", err)
+}
+
 func (q ledgerQueries) getSystemLedger(ctx context.Context, code, currency string) (LedgerRecord, error) {
 	l, err := scanLedger(q.db.QueryRow(ctx, `SELECT `+ledgerColumns+` FROM ledger.ledgers
 		WHERE kind = 'SYSTEM' AND code = $1 AND currency = $2`, code, currency))

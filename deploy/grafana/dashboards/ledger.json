@@ -33,7 +33,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (event, outcome) (rate({service=\"ledger-api\"} | json | event=~\"ledger\\\\.(credit|debit|account_open)\" [1m]))",
+          "expr": "sum by (event, outcome) (rate({service=\"ledger-api\"} | json | event=~\"ledger\\\\.(credit|debit|void|account_open)\" [1m]))",
           "legendFormat": "{{event}} {{outcome}}"
         }
       ],
@@ -97,7 +97,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (event, reason) (count_over_time({service=\"ledger-api\"} | json | outcome=\"denied\" | event=~\"ledger\\\\.(credit|debit|account_open)\" [5m]))",
+          "expr": "sum by (event, reason) (count_over_time({service=\"ledger-api\"} | json | outcome=\"denied\" | event=~\"ledger\\\\.(credit|debit|void|account_open)\" [5m]))",
           "legendFormat": "{{event}} {{reason}}"
         }
       ],

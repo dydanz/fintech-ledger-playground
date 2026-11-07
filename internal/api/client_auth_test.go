@@ -54,7 +54,7 @@ const (
 func testClients() []config.ClientCredential {
 	return []config.ClientCredential{
 		{ID: "payments", TokenHash: token.Hash(payToken), Operations: []string{"credit", "debit", "read"}},
-		{ID: "ops", TokenHash: token.Hash(opsToken), Operations: []string{"account_open", "read"}},
+		{ID: "ops", TokenHash: token.Hash(opsToken), Operations: []string{"account_open", "void", "read"}},
 	}
 }
 

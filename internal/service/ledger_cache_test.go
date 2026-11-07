@@ -180,3 +180,24 @@ func TestPendingIsNotCachedUntilProcessCompletes(t *testing.T) {
 		t.Fatalf("process: %d %s %v cached=%v", done.Status, done.Body, err, mr.Exists(cacheKey("payments", "cr-pend")))
 	}
 }
+
+func TestCachedVoidReplayDoesNotTouchPostgres(t *testing.T) {
+	e, _, cache := newCachedEnv(t)
+	acct := e.openAccount("cache-void@x.io")
+	credit, _ := e.money(e.svc.Credit, "cr-v", acct, 100, "IDR")
+	creditID := decode[txBody](t, credit).Transaction.ID
+	first, err := e.void("v-cache", creditID, "r")
+	if err != nil || first.Status != http.StatusCreated {
+		t.Fatalf("void: %d %s %v", first.Status, first.Body, err)
+	}
+
+	cfg := testConfig()
+	cfg.Cache = cache
+	offline, _ := service.NewLedgerService(untouchable{t}, cfg)
+	e.resetLogs()
+	r, err := offline.Void(e.ctx, service.VoidCommand{Request: req("ops", "v-cache"), TransactionID: creditID, Reason: "r"})
+	if err != nil || !r.Replayed || !bytes.Equal(r.Body, first.Body) {
+		t.Fatalf("cached void replay: %d %s %v", r.Status, r.Body, err)
+	}
+	wantEvent(t, e.logs, "ledger.idempotency", map[string]any{"operation": "void", "source": "cache"})
+}

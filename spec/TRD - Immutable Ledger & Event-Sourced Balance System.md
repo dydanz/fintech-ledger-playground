@@ -523,6 +523,12 @@ respond 201 / 422
   - A hit whose fingerprint or operation differs is ignored, and Postgres decides (422).
   - A 202 PENDING response is never cached. `Process` caches the response once the transaction is terminal, whether the request path or the sweeper ran it.
   - Every Redis call is bounded at 100 ms. A failure logs `dependency.call` at warn, and the request carries on with Postgres alone.
+- **Void (implemented in P2.2).**
+  - The body is `{"reason"}`, 1–64 characters. The reason is stored as the void's `reference`, so it is returned in responses and never logged.
+  - Account, currency, amount and counterparty ledger all come from the original. The fingerprint covers the original's id and the reason.
+  - A second void while one is in flight or settled hits `transactions_single_void_key` in Tx1. It is denied with 422 `not_voidable` and creates no transaction.
+  - An original that isn't voidable is decided in Tx2 under the original's row lock: not SETTLED, already a VOID, or a mismatch. That records a FAILED VOID with `not_voidable`.
+  - A FAILED void doesn't block a later one.
 - **Lock order** is always `transactions → accounts → ledgers`. For a void it is the void transaction, then the account, then the ledger, then the original transaction. Every path follows this order, so the design can't deadlock. A transaction touches exactly one user ledger, and system ledgers are never locked.
 - **Strict consistency (NFR).** Concurrent debits on the same ledger serialize on the `ledgers` row lock. Each one sees the committed balance of the previous one, so double-spending is impossible. The `ledgers_no_negative` CHECK is the last line of defence.
 - **Freezes take effect immediately (FR-09).** Freeze takes `accounts FOR UPDATE`, which conflicts with the `FOR SHARE` every Tx2 holds. Once the freeze commits, every later debit sees `FROZEN`. A debit already holding the lock finishes first, which is the correct serial order. Credits keep settling, and voids are allowed on frozen accounts (§16 Q3).

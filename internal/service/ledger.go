@@ -32,6 +32,8 @@ var (
 	ErrIdempotencyKeyReused = errors.New("idempotency key was already used with a different request")
 	ErrRequestInProgress    = errors.New("a request with this idempotency key is still in progress")
 	ErrTransactionNotFound  = errors.New("transaction not found")
+	// ErrNotVoidable: another void of the original is in flight or settled.
+	ErrNotVoidable = errors.New("transaction cannot be voided")
 
 	// ErrIdempotencyKeyInvalid is a ValidationError the API reports as
 	// idempotency_key_required (TRD §6.4).
@@ -461,20 +463,12 @@ func (s *LedgerService) validateMoney(typ ledger.TransactionType, cmd *MoneyComm
 }
 
 func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, cmd MoneyCommand) (Response, error) {
-	log := logger.FromContext(ctx)
-	event := eventName(typ)
-	attrs := func(extra ...any) []any {
-		return append([]any{"event", event, "account_id", cmd.AccountID, "amount", cmd.Amount,
-			"currency", cmd.Currency, "client_id", cmd.ClientID}, extra...)
-	}
-	deny := func(reason string, err error) (Response, error) {
-		log.WarnContext(ctx, verb(typ)+" denied", attrs("outcome", "denied", "reason", reason)...)
-		return Response{}, err
-	}
-
+	p := pendingTx{typ: typ, req: cmd.Request, accountID: cmd.AccountID, amount: cmd.Amount, currency: cmd.Currency,
+		reference: cmd.Reference, metadata: cmd.Metadata}
 	if reason, err := s.validateMoney(typ, &cmd); err != nil {
-		return deny(reason, err)
+		return p.deny(ctx, reason, err)
 	}
+	p.counterparty = cmd.Counterparty
 	fp, err := idempotency.Fingerprint(verb(typ), cmd.AccountID, struct {
 		Amount       int64           `json:"amount"`
 		Currency     string          `json:"currency"`
@@ -485,46 +479,103 @@ func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, 
 	if err != nil {
 		return Response{}, err
 	}
-	keyHash := idempotency.HashKey(cmd.IdempotencyKey)
+	p.fingerprint = fp
 	// A cached replay answers a retry without touching Postgres.
-	if resp, ok := s.cachedReplay(ctx, cmd.Request, keyHash, fp, verb(typ)); ok {
-		s.idempotencyOutcome(ctx, nil, resp, verb(typ))
+	if resp, ok := s.replayCached(ctx, p); ok {
 		return resp, nil
 	}
 	if _, err := s.store.GetAccount(ctx, cmd.AccountID); errors.Is(err, repository.ErrNotFound) {
-		return deny("account_not_found", ErrAccountNotFound)
+		return p.deny(ctx, "account_not_found", ErrAccountNotFound)
 	} else if err != nil {
-		log.ErrorContext(ctx, verb(typ)+" failed", attrs("outcome", "failure", "reason", "pg_error", "error", err)...)
-		return Response{}, err
+		return p.fail(ctx, err)
 	}
+	return s.record(ctx, p)
+}
 
+// pendingTx is what Tx1 records for a credit, debit or void.
+type pendingTx struct {
+	typ          ledger.TransactionType
+	req          Request
+	accountID    string
+	amount       int64
+	currency     string
+	counterparty string // system ledger code (credit/debit)
+	original     *repository.TransactionRecord
+	reference    string
+	metadata     json.RawMessage
+	fingerprint  string
+}
+
+func (p pendingTx) attrs(extra ...any) []any {
+	a := []any{"event", eventName(p.typ), "account_id", p.accountID, "amount", p.amount,
+		"currency", p.currency, "client_id", p.req.ClientID}
+	if p.original != nil {
+		a = append(a, "original_transaction_id", p.original.ID)
+	}
+	return append(a, extra...)
+}
+
+func (p pendingTx) deny(ctx context.Context, reason string, err error) (Response, error) {
+	logger.FromContext(ctx).WarnContext(ctx, verb(p.typ)+" denied", p.attrs("outcome", "denied", "reason", reason)...)
+	return Response{}, err
+}
+
+func (p pendingTx) fail(ctx context.Context, err error) (Response, error) {
+	logger.FromContext(ctx).ErrorContext(ctx, verb(p.typ)+" failed", p.attrs("outcome", "failure", "reason", "pg_error", "error", err)...)
+	return Response{}, err
+}
+
+// replayCached returns the cached response for a retry of p, if Redis has
+// one with the same fingerprint (TRD §7.1).
+func (s *LedgerService) replayCached(ctx context.Context, p pendingTx) (Response, bool) {
+	resp, ok := s.cachedReplay(ctx, p.req, idempotency.HashKey(p.req.IdempotencyKey), p.fingerprint, verb(p.typ))
+	if ok {
+		s.idempotencyOutcome(ctx, nil, resp, verb(p.typ))
+	}
+	return resp, ok
+}
+
+// record runs Tx1 (claim the key, record the PENDING transaction) and then
+// Tx2 on the request path.
+func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, error) {
+	keyHash := idempotency.HashKey(p.req.IdempotencyKey)
 	txID := ledger.NewID()
 
 	// Tx1: claim the key and record the request. Once this commits the request
 	// is durable, and a client retry maps to the same transaction.
 	var stored *repository.IdempotencyKey
 	errUnknownCounterparty := errors.New("unknown counterparty")
-	err = s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
-		cp, err := tx.GetSystemLedger(ctx, cmd.Counterparty, cmd.Currency)
+	err := s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
+		var cp repository.LedgerRecord
+		var err error
+		if p.original != nil {
+			cp, err = tx.GetLedger(ctx, p.original.CounterpartyLedgerID)
+		} else {
+			cp, err = tx.GetSystemLedger(ctx, p.counterparty, p.currency)
+		}
 		if errors.Is(err, repository.ErrNotFound) {
 			return errUnknownCounterparty
 		} else if err != nil {
 			return err
 		}
-		if stored, err = s.claim(ctx, tx, cmd.Request, keyHash, fp, verb(typ), txID); err != nil || stored != nil {
+		if stored, err = s.claim(ctx, tx, p.req, keyHash, p.fingerprint, verb(p.typ), txID); err != nil || stored != nil {
 			return err
 		}
-		if err := tx.InsertTransaction(ctx, repository.TransactionRecord{
-			ID: txID, AccountID: cmd.AccountID, CounterpartyLedgerID: cp.ID, Type: typ, Status: ledger.StatusPending,
-			Amount: cmd.Amount, Currency: cmd.Currency, Reference: cmd.Reference, Metadata: cmd.Metadata,
-			RequestedBy: cmd.ClientID, Version: 1, TraceID: cmd.TraceID,
-		}); err != nil {
+		rec := repository.TransactionRecord{
+			ID: txID, AccountID: p.accountID, CounterpartyLedgerID: cp.ID, Type: p.typ, Status: ledger.StatusPending,
+			Amount: p.amount, Currency: p.currency, Reference: p.reference, Metadata: p.metadata,
+			RequestedBy: p.req.ClientID, Version: 1, TraceID: p.req.TraceID,
+		}
+		requested := ledger.TransactionRequested{Type: p.typ, Amount: p.amount, Currency: p.currency,
+			Counterparty: cp.Code, Reference: p.reference, RequestedBy: p.req.ClientID}
+		if p.original != nil {
+			rec.OriginalTransactionID, requested.OriginalTransactionID = p.original.ID, p.original.ID
+		}
+		if err := tx.InsertTransaction(ctx, rec); err != nil {
 			return err
 		}
-		_, err = tx.AppendEvent(ctx, ledger.Event{StreamID: txID, StreamVersion: 1, AccountID: cmd.AccountID,
-			Payload: ledger.TransactionRequested{Type: typ, Amount: cmd.Amount, Currency: cmd.Currency,
-				Counterparty: cmd.Counterparty, Reference: cmd.Reference, RequestedBy: cmd.ClientID},
-			TraceID: cmd.TraceID}, "")
+		_, err = tx.AppendEvent(ctx, ledger.Event{StreamID: txID, StreamVersion: 1, AccountID: p.accountID,
+			Payload: requested, TraceID: p.req.TraceID}, "")
 		return err
 	})
 	var resp Response
@@ -533,28 +584,30 @@ func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, 
 	}
 	switch {
 	case errors.Is(err, errUnknownCounterparty):
-		return deny("invalid_input", &ValidationError{Msg: "counterparty is not a system ledger for this currency"})
-	case s.idempotencyOutcome(ctx, err, resp, verb(typ)):
+		return p.deny(ctx, "invalid_input", &ValidationError{Msg: "counterparty is not a system ledger for this currency"})
+	case errors.Is(err, repository.ErrVoidExists):
+		// Another void of the original is in flight or settled.
+		return p.deny(ctx, "not_voidable", ErrNotVoidable)
+	case s.idempotencyOutcome(ctx, err, resp, verb(p.typ)):
 		if err == nil {
 			s.remember(ctx, *stored) // backfill the cache from Postgres
 		}
 		return resp, err
 	case err != nil:
-		log.ErrorContext(ctx, verb(typ)+" failed", attrs("outcome", "failure", "reason", "pg_error", "error", err)...)
-		return Response{}, err
+		return p.fail(ctx, err)
 	}
 
 	// Tx2 on the request path. If it doesn't finish, the request stays PENDING
 	// (it's durable) and the sweeper completes it; the client gets 202.
-	resp, err = s.Process(ctx, ProcessInput{TransactionID: txID, ClientID: cmd.ClientID, KeyHash: keyHash, RequestID: cmd.RequestID})
+	resp, err = s.Process(ctx, ProcessInput{TransactionID: txID, ClientID: p.req.ClientID, KeyHash: keyHash, RequestID: p.req.RequestID})
 	if err != nil {
 		reason := "tx2_error"
 		if errors.Is(err, repository.ErrTimeout) {
 			reason = "tx2_timeout"
 		}
-		log.ErrorContext(ctx, verb(typ)+" deferred to recovery", attrs("outcome", "partial", "reason", reason,
+		logger.FromContext(ctx).ErrorContext(ctx, verb(p.typ)+" deferred to recovery", p.attrs("outcome", "partial", "reason", reason,
 			"error", err, "transaction_id", txID)...)
-		return s.pendingResponse(ctx, txID, typ, cmd)
+		return s.pendingResponse(ctx, txID, p)
 	}
 	return resp, nil
 }
@@ -562,15 +615,61 @@ func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, 
 // pendingResponse is the 202 for a request whose Tx1 committed but whose
 // Tx2 did not. It is not stored: the stored response is written when the
 // transaction reaches a terminal state.
-func (s *LedgerService) pendingResponse(ctx context.Context, txID string, typ ledger.TransactionType, cmd MoneyCommand) (Response, error) {
+func (s *LedgerService) pendingResponse(ctx context.Context, txID string, p pendingTx) (Response, error) {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
 	t, err := s.store.GetTransaction(rctx, txID)
 	if err != nil {
-		t = repository.TransactionRecord{ID: txID, AccountID: cmd.AccountID, Type: typ, Status: ledger.StatusPending,
-			Amount: cmd.Amount, Currency: cmd.Currency, Reference: cmd.Reference, TraceID: cmd.TraceID, CreatedAt: s.now()}
+		t = repository.TransactionRecord{ID: txID, AccountID: p.accountID, Type: p.typ, Status: ledger.StatusPending,
+			Amount: p.amount, Currency: p.currency, Reference: p.reference, TraceID: p.req.TraceID, CreatedAt: s.now()}
+		if p.original != nil {
+			t.OriginalTransactionID = p.original.ID
+		}
 	}
-	return renderTransaction(t, cmd.RequestID)
+	return renderTransaction(t, p.req.RequestID)
+}
+
+// --- void ---
+
+type VoidCommand struct {
+	Request
+	TransactionID string // the original
+	Reason        string // why; stored as the void's reference, never logged
+}
+
+// Void reverses a SETTLED credit or debit in full (FR-04) with a new VOID
+// transaction whose journal lines negate the original's (TRD §4.3). The
+// original becomes VOIDED. A void that would breach the floor fails with
+// insufficient_funds, and voids are allowed on frozen accounts (TRD §16 Q3).
+func (s *LedgerService) Void(ctx context.Context, cmd VoidCommand) (Response, error) {
+	p := pendingTx{typ: ledger.Void, req: cmd.Request, reference: cmd.Reason}
+	if err := cmd.Request.validate(); err != nil {
+		return p.deny(ctx, "invalid_input", err)
+	}
+	if n := utf8.RuneCountInString(cmd.Reason); n < 1 || n > maxReference {
+		return p.deny(ctx, "invalid_input", &ValidationError{Msg: fmt.Sprintf("reason is required, at most %d characters", maxReference)})
+	}
+	if !uuidPattern.MatchString(cmd.TransactionID) {
+		return p.deny(ctx, "transaction_not_found", ErrTransactionNotFound)
+	}
+	fp, err := idempotency.Fingerprint("void", cmd.TransactionID, map[string]string{"reason": cmd.Reason})
+	if err != nil {
+		return Response{}, err
+	}
+	p.fingerprint = fp
+	if resp, ok := s.replayCached(ctx, p); ok {
+		return resp, nil
+	}
+	orig, err := s.store.GetTransaction(ctx, cmd.TransactionID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return p.deny(ctx, "transaction_not_found", ErrTransactionNotFound)
+	} else if err != nil {
+		return p.fail(ctx, err)
+	}
+	// Whether the original can still be voided is decided in Tx2 under its
+	// row lock; a FAILED VOID records the attempt.
+	p.original, p.accountID, p.amount, p.currency = &orig, orig.AccountID, orig.Amount, orig.Currency
+	return s.record(ctx, p)
 }
 
 // ProcessInput identifies a PENDING transaction and the idempotency key whose
@@ -612,6 +711,15 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			return err
 		}
+		// A void locks its original last: transaction → account → ledger → original.
+		var orig *repository.TransactionRecord
+		if rec.Type == ledger.Void {
+			o, err := tx.LockTransaction(ctx, rec.OriginalTransactionID)
+			if err != nil {
+				return err
+			}
+			orig = &o
+		}
 
 		version := rec.Version
 		appendEvent := func(p ledger.Payload) error {
@@ -627,6 +735,7 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 			Tx: ledger.Transaction{ID: rec.ID, AccountID: rec.AccountID, Status: rec.Status, Version: rec.Version,
 				Type: rec.Type, Amount: rec.Amount, Currency: rec.Currency},
 			AccountStatus: acct.Status, LedgerFound: found, Balance: l.Balance, OverdraftLimit: l.OverdraftLimit,
+			Original: domainTx(orig),
 		})
 		if err != nil {
 			return err
@@ -650,6 +759,17 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 				return err
 			}
 			update.Status, update.Settled = ledger.StatusSettled, true
+			if orig != nil {
+				if _, err := tx.AppendEvent(ctx, ledger.Event{StreamID: orig.ID, StreamVersion: orig.Version + 1,
+					AccountID: orig.AccountID, Payload: ledger.TransactionVoided{VoidTransactionID: rec.ID},
+					TraceID: rec.TraceID}, l.ID); err != nil {
+					return err
+				}
+				if _, err := tx.UpdateTransaction(ctx, repository.TransactionUpdate{ID: orig.ID,
+					Status: ledger.StatusVoided, Version: orig.Version + 1}); err != nil {
+					return err
+				}
+			}
 		} else {
 			if err := appendEvent(ledger.TransactionFailed{Reason: d.Reason}); err != nil {
 				return err
@@ -683,6 +803,9 @@ func logTerminal(ctx context.Context, t repository.TransactionRecord) {
 	event := eventName(t.Type)
 	attrs := []any{"event", event, "transaction_id", t.ID, "account_id", t.AccountID, "ledger_id", t.LedgerID,
 		"amount", t.Amount, "currency", t.Currency, "client_id", t.RequestedBy}
+	if t.OriginalTransactionID != "" {
+		attrs = append(attrs, "original_transaction_id", t.OriginalTransactionID)
+	}
 	log := logger.FromContext(ctx)
 	if t.Status == ledger.StatusSettled {
 		log.InfoContext(ctx, verb(t.Type)+" settled", append(attrs, "outcome", "success",
@@ -690,6 +813,15 @@ func logTerminal(ctx context.Context, t repository.TransactionRecord) {
 		return
 	}
 	log.WarnContext(ctx, verb(t.Type)+" failed", append(attrs, "outcome", "denied", "reason", string(t.FailureReason))...)
+}
+
+// domainTx maps a locked projection row for Decide; nil stays nil.
+func domainTx(r *repository.TransactionRecord) *ledger.Transaction {
+	if r == nil {
+		return nil
+	}
+	return &ledger.Transaction{ID: r.ID, AccountID: r.AccountID, Status: r.Status, Version: r.Version,
+		Type: r.Type, Amount: r.Amount, Currency: r.Currency}
 }
 
 // --- idempotency ---

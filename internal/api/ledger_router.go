@@ -39,6 +39,7 @@ func NewLedgerRouter(d LedgerDeps) (*gin.Engine, error) {
 		internal.POST("/accounts/:account_id/credits", need("credit"), h.Credit)
 		internal.POST("/accounts/:account_id/debits", need("debit"), h.Debit)
 		internal.GET("/transactions/:transaction_id", need("read"), h.GetTransaction)
+		internal.POST("/transactions/:transaction_id/void", need("void"), h.Void)
 	}
 
 	user := r.Group("/api/v1/ledger", Auth(d.Sessions))
