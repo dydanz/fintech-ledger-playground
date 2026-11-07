@@ -259,6 +259,27 @@ func LoadWorker() (WorkerConfig, error) {
 	return cfg, errors.Join(errs...)
 }
 
+// ParseCurrencyLimits parses FRAUD_DEBIT_LIMITS: "IDR:50000000,USD:5000",
+// amounts in minor units. A currency may appear once; empty means no limits.
+func ParseCurrencyLimits(v string) (map[string]int64, error) {
+	out := map[string]int64{}
+	for _, entry := range splitList(v) {
+		cur, amount, ok := strings.Cut(entry, ":")
+		cur = strings.TrimSpace(cur)
+		n, err := strconv.ParseInt(strings.TrimSpace(amount), 10, 64)
+		switch {
+		case !ok || !currencyPattern.MatchString(cur):
+			return nil, fmt.Errorf("FRAUD_DEBIT_LIMITS: %q must be CUR:amount with an ISO 4217 code", entry)
+		case err != nil || n <= 0:
+			return nil, fmt.Errorf("FRAUD_DEBIT_LIMITS: %s limit must be a positive integer (minor units)", cur)
+		case out[cur] != 0:
+			return nil, fmt.Errorf("FRAUD_DEBIT_LIMITS: %s appears twice", cur)
+		}
+		out[cur] = n
+	}
+	return out, nil
+}
+
 // ParseClients parses LEDGER_CLIENTS: "id:sha256hex:op,op;id2:...". It
 // rejects unknown operations, malformed hashes, and duplicate ids or hashes.
 // The error never contains the hash values.
@@ -318,6 +339,7 @@ func CheckUnfreezeGrants(clients []ClientCredential, allowed []string) error {
 var (
 	clientIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	sha256Pattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 )
 
 func getDuration(key string, def time.Duration) (time.Duration, error) {
