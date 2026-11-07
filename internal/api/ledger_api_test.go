@@ -16,10 +16,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"auth-api/internal/outbox"
 	"auth-api/internal/repository"
 	"auth-api/internal/service"
+	"auth-api/internal/session"
 	"auth-api/internal/testutil/pgtest"
 )
 
@@ -54,6 +56,8 @@ type ledgerHarness struct {
 	srv   *gin.Engine
 	logs  *bytes.Buffer
 	store *flakyStore
+	pool  *pgxpool.Pool
+	sess  *session.RedisStore
 	userA string
 }
 
@@ -61,7 +65,7 @@ func newLedgerHarness(t *testing.T) *ledgerHarness {
 	t.Helper()
 	pool := pgtest.New(t)
 	store := &flakyStore{LedgerStore: repository.NewLedgerRepo(pool, outbox.DefaultTopic)}
-	srv, logs := newLedgerRouter(t, store)
+	srv, logs, sessions := newLedgerRouter(t, store)
 	var userA string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO users (email, password_hash) VALUES ('a@x.io', 'x') RETURNING id`).Scan(&userA); err != nil {
 		t.Fatal(err)
@@ -72,7 +76,7 @@ func newLedgerHarness(t *testing.T) *ledgerHarness {
 	if err := svc.EnsureSystemLedgers(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return &ledgerHarness{t: t, srv: srv, logs: logs, store: store, userA: userA}
+	return &ledgerHarness{t: t, srv: srv, logs: logs, store: store, pool: pool, sess: sessions, userA: userA}
 }
 
 func (h *ledgerHarness) do(method, path, tok, key, body string) *httptest.ResponseRecorder {

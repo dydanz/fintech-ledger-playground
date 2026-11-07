@@ -48,6 +48,7 @@ type LedgerStore interface {
 	GetAccountByUserID(ctx context.Context, userID string) (repository.AccountRecord, error)
 	ListUserLedgers(ctx context.Context, accountID string) ([]repository.LedgerRecord, error)
 	GetTransaction(ctx context.Context, id string) (repository.TransactionRecord, error)
+	ListTransactions(ctx context.Context, q repository.TransactionQuery) ([]repository.TransactionRecord, error)
 }
 
 type LedgerConfig struct {

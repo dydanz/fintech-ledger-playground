@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 
 	"auth-api/internal/api"
 	"auth-api/internal/config"
 	"auth-api/internal/logger"
 	"auth-api/internal/repository"
 	"auth-api/internal/service"
+	"auth-api/internal/session"
 	"auth-api/internal/startup"
 )
 
@@ -53,6 +56,15 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 	}
 	defer db.Close()
 
+	// Only the user routes need Redis (auth-api's sessions). Startup waits for
+	// it, but readiness doesn't include it: a later Redis outage fails just the
+	// user routes (503 from Auth) and leaves the internal write path serving.
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, DB: cfg.RedisDB})
+	defer rdb.Close()
+	if err := startup.Retry(ctx, log, "redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() }); err != nil {
+		return fmt.Errorf("connect redis: %w", err)
+	}
+
 	ledgerSvc, err := service.NewLedgerService(repository.NewLedgerRepo(db, cfg.EventsTopic), service.LedgerConfig{
 		Currencies:       cfg.Currencies,
 		MaxAmount:        cfg.MaxAmount,
@@ -72,6 +84,7 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 		Logger:         log,
 		Ledger:         ledgerSvc,
 		Clients:        api.NewClients(cfg.Clients),
+		Sessions:       session.NewRedisStore(rdb),
 		TrustedProxies: cfg.TrustedProxies,
 		Ready:          db.Ping,
 	})
