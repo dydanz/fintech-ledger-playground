@@ -29,10 +29,11 @@ type Runner struct {
 	db           *pgxpool.Pool
 	jobs         []Job
 	AcquireEvery time.Duration // how often a follower retries for leadership
+	LeaseCheck   time.Duration // how often a leader confirms its lock connection
 }
 
 func NewRunner(db *pgxpool.Pool, jobs ...Job) *Runner {
-	return &Runner{db: db, jobs: jobs, AcquireEvery: 5 * time.Second}
+	return &Runner{db: db, jobs: jobs, AcquireEvery: 5 * time.Second, LeaseCheck: time.Second}
 }
 
 // Run blocks until ctx ends, running every job on this replica while it
@@ -63,8 +64,11 @@ func (r *Runner) runJob(ctx context.Context, j Job) {
 }
 
 // lead tries to become the job's leader and, if it does, runs the job every
-// Interval until ctx ends or the lock connection fails. led reports whether
-// this replica held the lock at all.
+// Interval until ctx ends or the lock connection fails. While leading, the
+// lock connection is pinged every LeaseCheck; if it fails, the job's context
+// is cancelled at once, so a long-running job (the outbox relay) stops
+// before another replica can take over. led reports whether this replica
+// held the lock at all.
 func (r *Runner) lead(ctx context.Context, log *slog.Logger, j Job) (led bool, err error) {
 	conn, err := r.db.Acquire(ctx)
 	if err != nil {
@@ -76,7 +80,24 @@ func (r *Runner) lead(ctx context.Context, log *slog.Logger, j Job) (led bool, e
 		return false, err
 	}
 	log.InfoContext(ctx, "job leadership acquired", "event", "app.leader", "outcome", "success", "state", "acquired")
+
+	jobCtx, cancelJob := context.WithCancel(ctx)
+	lost := make(chan error, 1)
+	var watch sync.WaitGroup
+	watch.Add(1)
+	go func() { // the lease: the lock lives exactly as long as conn
+		defer watch.Done()
+		for sleep(jobCtx, r.LeaseCheck) {
+			if err := conn.Ping(jobCtx); err != nil && jobCtx.Err() == nil {
+				lost <- err
+				cancelJob()
+				return
+			}
+		}
+	}()
 	defer func() {
+		cancelJob()
+		watch.Wait() // conn is free again
 		// A session lock outlives the statement: release it explicitly (on
 		// a fresh context, since ctx may be done), or drop the connection.
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -88,19 +109,18 @@ func (r *Runner) lead(ctx context.Context, log *slog.Logger, j Job) (led bool, e
 	}()
 
 	for {
-		_ = j.Run(ctx) // the job has logged its outcome
-		if !sleep(ctx, j.Interval) {
-			return true, nil
+		_ = j.Run(jobCtx) // the job has logged its outcome
+		if !sleep(jobCtx, j.Interval) {
+			break
 		}
-		// Still leading only while the lock's connection is alive.
-		if err := conn.Ping(ctx); err != nil {
-			if ctx.Err() != nil {
-				return true, nil
-			}
-			log.WarnContext(ctx, "job leadership lost", "event", "app.leader", "outcome", "failure",
-				"reason", "connection_lost", "error", err)
-			return true, errors.Join(errors.New("leadership connection lost"), err)
-		}
+	}
+	select {
+	case err := <-lost:
+		log.WarnContext(ctx, "job leadership lost", "event", "app.leader", "outcome", "failure",
+			"reason", "connection_lost", "error", err)
+		return true, errors.Join(errors.New("leadership connection lost"), err)
+	default:
+		return true, nil
 	}
 }
 

@@ -191,17 +191,23 @@ type WorkerConfig struct {
 	SweepAfter      time.Duration // LEDGER_SWEEP_AFTER
 	PendingMaxAge   time.Duration // LEDGER_PENDING_MAX_AGE
 	PurgeInterval   time.Duration // IDEMPOTENCY_PURGE_INTERVAL
+	KafkaBrokers    []string      // KAFKA_BROKERS
+	OutboxPoll      time.Duration // OUTBOX_POLL_INTERVAL
+	OutboxBatch     int           // OUTBOX_BATCH_SIZE
+	OutboxRetention time.Duration // OUTBOX_RETENTION
+	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT: bound on one batch
 }
 
 // LoadWorker reads the ledger-worker environment (TRD §12.2).
 func LoadWorker() (WorkerConfig, error) {
 	var errs []error
 	cfg := WorkerConfig{
-		ServiceName: getEnv("SERVICE_NAME", "ledger-worker"),
-		HTTPAddr:    getEnv("WORKER_HTTP_ADDR", ":8082"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		Currencies:  splitList(getEnv("LEDGER_CURRENCIES", "IDR")),
-		EventsTopic: getEnv("KAFKA_TOPIC_EVENTS", "ledger.events.v1"),
+		ServiceName:  getEnv("SERVICE_NAME", "ledger-worker"),
+		HTTPAddr:     getEnv("WORKER_HTTP_ADDR", ":8082"),
+		DatabaseURL:  os.Getenv("DATABASE_URL"),
+		Currencies:   splitList(getEnv("LEDGER_CURRENCIES", "IDR")),
+		EventsTopic:  getEnv("KAFKA_TOPIC_EVENTS", "ledger.events.v1"),
+		KafkaBrokers: splitList(getEnv("KAFKA_BROKERS", "localhost:9094")),
 	}
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
@@ -210,6 +216,11 @@ func LoadWorker() (WorkerConfig, error) {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
 	}
 	var err error
+	if cfg.OutboxBatch, err = getInt("OUTBOX_BATCH_SIZE", 500); err != nil {
+		errs = append(errs, err)
+	} else if cfg.OutboxBatch < 1 || cfg.OutboxBatch > 10000 {
+		errs = append(errs, errors.New("OUTBOX_BATCH_SIZE must be between 1 and 10000"))
+	}
 	for _, d := range []struct {
 		dst *time.Duration
 		key string
@@ -222,13 +233,19 @@ func LoadWorker() (WorkerConfig, error) {
 		{&cfg.SweepAfter, "LEDGER_SWEEP_AFTER", 5 * time.Second},
 		{&cfg.PendingMaxAge, "LEDGER_PENDING_MAX_AGE", 15 * time.Minute},
 		{&cfg.PurgeInterval, "IDEMPOTENCY_PURGE_INTERVAL", time.Minute},
+		{&cfg.OutboxPoll, "OUTBOX_POLL_INTERVAL", 200 * time.Millisecond},
+		{&cfg.OutboxRetention, "OUTBOX_RETENTION", 72 * time.Hour},
+		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
 	} {
 		if *d.dst, err = getDuration(d.key, d.def); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if cfg.SweepInterval <= 0 || cfg.PurgeInterval <= 0 {
-		errs = append(errs, errors.New("LEDGER_SWEEP_INTERVAL and IDEMPOTENCY_PURGE_INTERVAL must be positive"))
+	if cfg.SweepInterval <= 0 || cfg.PurgeInterval <= 0 || cfg.OutboxPoll <= 0 || cfg.OutboxRetention <= 0 || cfg.OutboxPublish <= 0 {
+		errs = append(errs, errors.New("LEDGER_SWEEP_INTERVAL, IDEMPOTENCY_PURGE_INTERVAL, OUTBOX_POLL_INTERVAL and OUTBOX_RETENTION must be positive"))
+	}
+	if len(cfg.KafkaBrokers) == 0 {
+		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
 	}
 	// A sweep must not race the request path's own Tx2.
 	if cfg.SweepAfter < cfg.ProcessTimeout {

@@ -1,5 +1,5 @@
 // Package outbox encodes ledger events into the Kafka envelope written to
-// ledger.outbox (spec/TRD §7.3). The relay that publishes the rows lands in P3.
+// ledger.outbox, and relays the rows to Kafka (spec/TRD §7.3).
 package outbox
 
 import (

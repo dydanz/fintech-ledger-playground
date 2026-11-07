@@ -96,7 +96,9 @@ func TestLoadWorkerDefaultsAndErrors(t *testing.T) {
 	}
 	if cfg.ServiceName != "ledger-worker" || cfg.HTTPAddr != ":8082" || cfg.SweepInterval != 5*time.Second ||
 		cfg.SweepAfter != 5*time.Second || cfg.PendingMaxAge != 15*time.Minute || cfg.PurgeInterval != time.Minute ||
-		cfg.ProcessTimeout != 2*time.Second || strings.Join(cfg.Currencies, ",") != "IDR" {
+		cfg.ProcessTimeout != 2*time.Second || strings.Join(cfg.Currencies, ",") != "IDR" ||
+		cfg.OutboxPoll != 200*time.Millisecond || cfg.OutboxBatch != 500 || cfg.OutboxRetention != 72*time.Hour ||
+		strings.Join(cfg.KafkaBrokers, ",") != "localhost:9094" {
 		t.Fatalf("defaults = %+v", cfg)
 	}
 	// The sweeper must not take over a Tx2 the request path may still finish.
