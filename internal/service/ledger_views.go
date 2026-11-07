@@ -15,6 +15,7 @@ type Response struct {
 	Status   int
 	Body     []byte
 	Replayed bool // true when served from a stored idempotent response
+	cached   bool // the replay came from the Redis cache
 }
 
 type TransactionView struct {

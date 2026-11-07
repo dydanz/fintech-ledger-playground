@@ -182,7 +182,9 @@ type LedgerTx interface {
 	// already holds it; an expired row is replaced.
 	InsertIdempotencyKey(ctx context.Context, k IdempotencyKey) (bool, error)
 	GetIdempotencyKey(ctx context.Context, clientID, keyHash string) (IdempotencyKey, error)
-	CompleteIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) error
+	// CompleteIdempotencyKey stores the final response and returns the
+	// completed row (fingerprint, operation, expires_at), for the Redis cache.
+	CompleteIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) (IdempotencyKey, error)
 }
 
 // dbtx is satisfied by both *pgxpool.Pool and pgx.Tx.
@@ -318,6 +320,6 @@ func (t *pgLedgerTx) InsertIdempotencyKey(ctx context.Context, k IdempotencyKey)
 func (t *pgLedgerTx) GetIdempotencyKey(ctx context.Context, clientID, keyHash string) (IdempotencyKey, error) {
 	return t.q.getIdempotencyKey(ctx, clientID, keyHash)
 }
-func (t *pgLedgerTx) CompleteIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) error {
+func (t *pgLedgerTx) CompleteIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) (IdempotencyKey, error) {
 	return t.q.completeIdempotencyKey(ctx, clientID, keyHash, status, body)
 }

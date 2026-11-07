@@ -399,12 +399,21 @@ func (q ledgerQueries) getIdempotencyKey(ctx context.Context, clientID, keyHash 
 	return k, nil
 }
 
-func (q ledgerQueries) completeIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) error {
-	tag, err := q.db.Exec(ctx,
+func (q ledgerQueries) completeIdempotencyKey(ctx context.Context, clientID, keyHash string, status int, body []byte) (IdempotencyKey, error) {
+	k := IdempotencyKey{ClientID: clientID, KeyHash: keyHash, ResponseStatus: status, ResponseBody: body}
+	err := q.db.QueryRow(ctx,
 		`UPDATE ledger.idempotency_keys SET response_status = $3, response_body = $4
-		  WHERE client_id = $1 AND key_hash = $2 AND response_status IS NULL`,
-		clientID, keyHash, status, body)
-	return wrapWrite("complete idempotency key", tag, err)
+		  WHERE client_id = $1 AND key_hash = $2 AND response_status IS NULL
+		  RETURNING request_fingerprint, operation, resource_id, created_at, expires_at`,
+		clientID, keyHash, status, body,
+	).Scan(&k.Fingerprint, &k.Operation, &k.ResourceID, &k.CreatedAt, &k.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return IdempotencyKey{}, ErrNotFound
+	}
+	if err != nil {
+		return IdempotencyKey{}, fmt.Errorf("complete idempotency key: %w", err)
+	}
+	return k, nil
 }
 
 // --- helpers ---

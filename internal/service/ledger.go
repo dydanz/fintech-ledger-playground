@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +61,9 @@ type LedgerConfig struct {
 	ProcessTimeout   time.Duration // LEDGER_PROCESS_TIMEOUT: bound on Tx1 and on Tx2
 	IdempotencyTTL   time.Duration // IDEMPOTENCY_TTL
 	OverdraftClients []string      // LEDGER_OVERDRAFT_CLIENTS: may set overdraft_limit > 0
+	// Cache is the optional Redis fast path for idempotent replays (TRD
+	// §7.1). nil means Postgres only; Postgres is always the authority.
+	Cache idempotency.Cache
 }
 
 type LedgerService struct {
@@ -204,9 +209,14 @@ func (s *LedgerService) OpenAccount(ctx context.Context, cmd OpenAccountCommand)
 		return Response{}, err
 	}
 	keyHash := idempotency.HashKey(cmd.IdempotencyKey)
+	if resp, ok := s.cachedReplay(ctx, cmd.Request, keyHash, fp, "account_open"); ok {
+		s.idempotencyOutcome(ctx, nil, resp, "account_open")
+		return resp, nil
+	}
 	currency := s.cfg.Currencies[0]
 
 	var resp Response
+	var done repository.IdempotencyKey
 	var opened repository.AccountRecord
 	attempt := func() error {
 		return s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
@@ -219,9 +229,9 @@ func (s *LedgerService) OpenAccount(ctx context.Context, cmd OpenAccountCommand)
 			if exists {
 				accountID = existing.ID
 			}
-			if replay, err := s.claim(ctx, tx, cmd.Request, keyHash, fp, "account_open", accountID); err != nil || replay != nil {
-				if replay != nil {
-					resp = *replay
+			if stored, err := s.claim(ctx, tx, cmd.Request, keyHash, fp, "account_open", accountID); err != nil || stored != nil {
+				if stored != nil {
+					done, resp = *stored, replayOf(*stored)
 				}
 				return err
 			}
@@ -262,7 +272,8 @@ func (s *LedgerService) OpenAccount(ctx context.Context, cmd OpenAccountCommand)
 			if resp, err = marshalResponse(status, map[string]AccountView{"account": ToAccountView(acct, ledgers)}); err != nil {
 				return err
 			}
-			return tx.CompleteIdempotencyKey(ctx, cmd.ClientID, keyHash, resp.Status, resp.Body)
+			done, err = tx.CompleteIdempotencyKey(ctx, cmd.ClientID, keyHash, resp.Status, resp.Body)
+			return err
 		})
 	}
 
@@ -275,12 +286,16 @@ func (s *LedgerService) OpenAccount(ctx context.Context, cmd OpenAccountCommand)
 	case errors.Is(err, repository.ErrUserNotFound):
 		return deny("user_not_found", ErrUserNotFound)
 	case s.idempotencyOutcome(ctx, err, resp, "account_open"):
+		if err == nil {
+			s.remember(ctx, done)
+		}
 		return resp, err
 	case err != nil:
 		log.ErrorContext(ctx, "account open failed", "event", "ledger.account_open", "outcome", "failure",
 			"reason", "pg_error", "error", err, "client_id", cmd.ClientID)
 		return Response{}, err
 	}
+	s.remember(ctx, done)
 	log.InfoContext(ctx, "account opened", "event", "ledger.account_open", "outcome", "success",
 		"account_id", opened.ID, "user_id", opened.UserID, "client_id", cmd.ClientID, "created", resp.Status == http.StatusCreated)
 	return resp, nil
@@ -323,17 +338,22 @@ func (s *LedgerService) OpenLedger(ctx context.Context, cmd OpenLedgerCommand) (
 		return Response{}, err
 	}
 	keyHash := idempotency.HashKey(cmd.IdempotencyKey)
+	if resp, ok := s.cachedReplay(ctx, cmd.Request, keyHash, fp, "ledger_open"); ok {
+		s.idempotencyOutcome(ctx, nil, resp, "ledger_open")
+		return resp, nil
+	}
 	ledgerID := ledger.NewID()
 
 	var resp Response
+	var done repository.IdempotencyKey
 	err = s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
 		acct, err := tx.LockAccount(ctx, cmd.AccountID, repository.LockUpdate)
 		if err != nil {
 			return err
 		}
-		if replay, err := s.claim(ctx, tx, cmd.Request, keyHash, fp, "ledger_open", ledgerID); err != nil || replay != nil {
-			if replay != nil {
-				resp = *replay
+		if stored, err := s.claim(ctx, tx, cmd.Request, keyHash, fp, "ledger_open", ledgerID); err != nil || stored != nil {
+			if stored != nil {
+				done, resp = *stored, replayOf(*stored)
 			}
 			return err
 		}
@@ -361,7 +381,8 @@ func (s *LedgerService) OpenLedger(ctx context.Context, cmd OpenLedgerCommand) (
 				}
 			}
 		}
-		return tx.CompleteIdempotencyKey(ctx, cmd.ClientID, keyHash, resp.Status, resp.Body)
+		done, err = tx.CompleteIdempotencyKey(ctx, cmd.ClientID, keyHash, resp.Status, resp.Body)
+		return err
 	})
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
@@ -369,12 +390,16 @@ func (s *LedgerService) OpenLedger(ctx context.Context, cmd OpenLedgerCommand) (
 	case errors.Is(err, repository.ErrLedgerExists):
 		return deny("ledger_exists", ErrLedgerExists)
 	case s.idempotencyOutcome(ctx, err, resp, "ledger_open"):
+		if err == nil {
+			s.remember(ctx, done)
+		}
 		return resp, err
 	case err != nil:
 		log.ErrorContext(ctx, "ledger open failed", "event", "ledger.account_open", "outcome", "failure",
 			"reason", "pg_error", "error", err, "account_id", cmd.AccountID, "client_id", cmd.ClientID)
 		return Response{}, err
 	}
+	s.remember(ctx, done)
 	log.InfoContext(ctx, "ledger opened", "event", "ledger.account_open", "outcome", "success",
 		"account_id", cmd.AccountID, "ledger_id", ledgerID, "currency", cmd.Currency, "client_id", cmd.ClientID)
 	return resp, nil
@@ -444,12 +469,6 @@ func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, 
 		return p.deny(ctx, reason, err)
 	}
 	p.counterparty = cmd.Counterparty
-	if _, err := s.store.GetAccount(ctx, cmd.AccountID); errors.Is(err, repository.ErrNotFound) {
-		return p.deny(ctx, "account_not_found", ErrAccountNotFound)
-	} else if err != nil {
-		return p.fail(ctx, err)
-	}
-
 	fp, err := idempotency.Fingerprint(verb(typ), cmd.AccountID, struct {
 		Amount       int64           `json:"amount"`
 		Currency     string          `json:"currency"`
@@ -461,6 +480,15 @@ func (s *LedgerService) submit(ctx context.Context, typ ledger.TransactionType, 
 		return Response{}, err
 	}
 	p.fingerprint = fp
+	// A cached replay answers a retry without touching Postgres.
+	if resp, ok := s.replayCached(ctx, p); ok {
+		return resp, nil
+	}
+	if _, err := s.store.GetAccount(ctx, cmd.AccountID); errors.Is(err, repository.ErrNotFound) {
+		return p.deny(ctx, "account_not_found", ErrAccountNotFound)
+	} else if err != nil {
+		return p.fail(ctx, err)
+	}
 	return s.record(ctx, p)
 }
 
@@ -497,6 +525,16 @@ func (p pendingTx) fail(ctx context.Context, err error) (Response, error) {
 	return Response{}, err
 }
 
+// replayCached returns the cached response for a retry of p, if Redis has
+// one with the same fingerprint (TRD §7.1).
+func (s *LedgerService) replayCached(ctx context.Context, p pendingTx) (Response, bool) {
+	resp, ok := s.cachedReplay(ctx, p.req, idempotency.HashKey(p.req.IdempotencyKey), p.fingerprint, verb(p.typ))
+	if ok {
+		s.idempotencyOutcome(ctx, nil, resp, verb(p.typ))
+	}
+	return resp, ok
+}
+
 // record runs Tx1 (claim the key, record the PENDING transaction) and then
 // Tx2 on the request path.
 func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, error) {
@@ -505,7 +543,7 @@ func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, erro
 
 	// Tx1: claim the key and record the request. Once this commits the request
 	// is durable, and a client retry maps to the same transaction.
-	var replay *Response
+	var stored *repository.IdempotencyKey
 	errUnknownCounterparty := errors.New("unknown counterparty")
 	err := s.store.InTx(ctx, s.cfg.ProcessTimeout, func(tx repository.LedgerTx) error {
 		var cp repository.LedgerRecord
@@ -520,7 +558,7 @@ func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, erro
 		} else if err != nil {
 			return err
 		}
-		if replay, err = s.claim(ctx, tx, p.req, keyHash, p.fingerprint, verb(p.typ), txID); err != nil || replay != nil {
+		if stored, err = s.claim(ctx, tx, p.req, keyHash, p.fingerprint, verb(p.typ), txID); err != nil || stored != nil {
 			return err
 		}
 		rec := repository.TransactionRecord{
@@ -541,8 +579,8 @@ func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, erro
 		return err
 	})
 	var resp Response
-	if replay != nil {
-		resp = *replay
+	if stored != nil {
+		resp = replayOf(*stored)
 	}
 	switch {
 	case errors.Is(err, errUnknownCounterparty):
@@ -551,6 +589,9 @@ func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, erro
 		// Another void of the original is in flight or settled.
 		return p.deny(ctx, "not_voidable", ErrNotVoidable)
 	case s.idempotencyOutcome(ctx, err, resp, verb(p.typ)):
+		if err == nil {
+			s.remember(ctx, *stored) // backfill the cache from Postgres
+		}
 		return resp, err
 	case err != nil:
 		return p.fail(ctx, err)
@@ -611,6 +652,14 @@ func (s *LedgerService) Void(ctx context.Context, cmd VoidCommand) (Response, er
 	if !uuidPattern.MatchString(cmd.TransactionID) {
 		return p.deny(ctx, "transaction_not_found", ErrTransactionNotFound)
 	}
+	fp, err := idempotency.Fingerprint("void", cmd.TransactionID, map[string]string{"reason": cmd.Reason})
+	if err != nil {
+		return Response{}, err
+	}
+	p.fingerprint = fp
+	if resp, ok := s.replayCached(ctx, p); ok {
+		return resp, nil
+	}
 	orig, err := s.store.GetTransaction(ctx, cmd.TransactionID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return p.deny(ctx, "transaction_not_found", ErrTransactionNotFound)
@@ -620,12 +669,6 @@ func (s *LedgerService) Void(ctx context.Context, cmd VoidCommand) (Response, er
 	// Whether the original can still be voided is decided in Tx2 under its
 	// row lock; a FAILED VOID records the attempt.
 	p.original, p.accountID, p.amount, p.currency = &orig, orig.AccountID, orig.Amount, orig.Currency
-
-	fp, err := idempotency.Fingerprint("void", orig.ID, map[string]string{"reason": cmd.Reason})
-	if err != nil {
-		return Response{}, err
-	}
-	p.fingerprint = fp
 	return s.record(ctx, p)
 }
 
@@ -644,6 +687,7 @@ type ProcessInput struct {
 func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response, error) {
 	var (
 		resp    Response
+		done    repository.IdempotencyKey
 		final   repository.TransactionRecord
 		already bool
 	)
@@ -742,12 +786,14 @@ func (s *LedgerService) Process(ctx context.Context, in ProcessInput) (Response,
 		if resp, err = renderTransaction(final, in.RequestID); err != nil {
 			return err
 		}
-		return tx.CompleteIdempotencyKey(ctx, in.ClientID, in.KeyHash, resp.Status, resp.Body)
+		done, err = tx.CompleteIdempotencyKey(ctx, in.ClientID, in.KeyHash, resp.Status, resp.Body)
+		return err
 	})
 	if err != nil {
 		return Response{}, err
 	}
 	if !already {
+		s.remember(ctx, done)
 		logTerminal(ctx, final)
 	}
 	return resp, nil
@@ -780,10 +826,10 @@ func domainTx(r *repository.TransactionRecord) *ledger.Transaction {
 
 // --- idempotency ---
 
-// claim takes the idempotency key for this request inside tx. It returns a
-// stored response to replay, ErrIdempotencyKeyReused, ErrRequestInProgress,
-// or (nil, nil) when the key is now ours.
-func (s *LedgerService) claim(ctx context.Context, tx repository.LedgerTx, r Request, keyHash, fp, op, resourceID string) (*Response, error) {
+// claim takes the idempotency key for this request inside tx. It returns the
+// completed row to replay, ErrIdempotencyKeyReused, ErrRequestInProgress, or
+// (nil, nil) when the key is now ours.
+func (s *LedgerService) claim(ctx context.Context, tx repository.LedgerTx, r Request, keyHash, fp, op, resourceID string) (*repository.IdempotencyKey, error) {
 	ok, err := tx.InsertIdempotencyKey(ctx, repository.IdempotencyKey{ClientID: r.ClientID, KeyHash: keyHash,
 		Fingerprint: fp, Operation: op, ResourceID: resourceID, ExpiresAt: s.now().Add(s.cfg.IdempotencyTTL)})
 	if err != nil || ok {
@@ -798,7 +844,11 @@ func (s *LedgerService) claim(ctx context.Context, tx repository.LedgerTx, r Req
 	case k.ResponseBody == nil:
 		return nil, ErrRequestInProgress
 	}
-	return &Response{Status: k.ResponseStatus, Body: k.ResponseBody, Replayed: true}, nil
+	return &k, nil
+}
+
+func replayOf(k repository.IdempotencyKey) Response {
+	return Response{Status: k.ResponseStatus, Body: k.ResponseBody, Replayed: true}
 }
 
 // idempotencyOutcome logs ledger.idempotency for a replay or a key conflict
@@ -807,8 +857,12 @@ func (s *LedgerService) idempotencyOutcome(ctx context.Context, err error, resp 
 	log := logger.FromContext(ctx)
 	switch {
 	case err == nil && resp.Replayed:
+		source := "postgres"
+		if resp.cached {
+			source = "cache"
+		}
 		log.InfoContext(ctx, "idempotent replay", "event", "ledger.idempotency", "outcome", "success",
-			"operation", op, "status", resp.Status)
+			"operation", op, "status", resp.Status, "source", source)
 	case errors.Is(err, ErrIdempotencyKeyReused):
 		log.WarnContext(ctx, "idempotency key reused", "event", "ledger.idempotency", "outcome", "denied",
 			"reason", "key_reused", "operation", op)
@@ -819,4 +873,55 @@ func (s *LedgerService) idempotencyOutcome(ctx context.Context, err error, resp 
 		return false
 	}
 	return true
+}
+
+// cacheTimeout bounds each Redis call so a slow or unreachable Redis adds at
+// most this much latency before the Postgres path takes over.
+const cacheTimeout = 100 * time.Millisecond
+
+// cachedReplay returns the cached response for a retry whose fingerprint and
+// operation match. Anything else (miss, mismatch, Redis down) falls through
+// to Postgres, which decides replay, 409 or 422.
+func (s *LedgerService) cachedReplay(ctx context.Context, r Request, keyHash, fp, op string) (Response, bool) {
+	if s.cfg.Cache == nil {
+		return Response{}, false
+	}
+	cctx, cancel := context.WithTimeout(ctx, cacheTimeout)
+	defer cancel()
+	e, ok, err := s.cfg.Cache.Get(cctx, r.ClientID, keyHash)
+	if err != nil {
+		cacheUnavailable(ctx, "idempotency_get", err)
+		return Response{}, false
+	}
+	if !ok || e.Fingerprint != fp || e.Operation != op {
+		return Response{}, false
+	}
+	return Response{Status: e.Status, Body: e.Body, Replayed: true, cached: true}, true
+}
+
+// remember caches a completed response until its Postgres row expires. It is
+// best effort and runs after commit, even if the client has gone away.
+func (s *LedgerService) remember(ctx context.Context, k repository.IdempotencyKey) {
+	if s.cfg.Cache == nil || k.ResponseBody == nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cacheTimeout)
+	defer cancel()
+	if err := s.cfg.Cache.Set(cctx, k.ClientID, k.KeyHash, idempotency.Entry{Fingerprint: k.Fingerprint,
+		Operation: k.Operation, Status: k.ResponseStatus, Body: k.ResponseBody, ExpiresAt: k.ExpiresAt}); err != nil {
+		cacheUnavailable(ctx, "idempotency_set", err)
+	}
+}
+
+func cacheUnavailable(ctx context.Context, operation string, err error) {
+	reason := "unknown"
+	var netErr net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		reason = "timeout"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		reason = "refused"
+	}
+	logger.FromContext(ctx).WarnContext(ctx, "idempotency cache unavailable, using postgres", "event", "dependency.call",
+		"outcome", "failure", "reason", reason, "dependency", "redis", "operation", operation, "error", err)
 }

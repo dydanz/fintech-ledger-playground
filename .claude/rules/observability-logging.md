@@ -122,12 +122,13 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `audit.revoke` | C3 | success=info, partial=error, failure=warn | `pg_update_failed`, `no_open_record`, `orphan_compensation_failed` | `service.AuthService.Login` / `Logout` |
 | `user.profile_update` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `not_found`, `pg_error` | `service.UserService.UpdateProfile` |
 | `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `startup.Retry` (every `cmd/*`) |
+| `dependency.call` | C4 | failure=warn (degraded, fell back) | `timeout`, `refused`, `unknown` | `service.LedgerService` idempotency cache (`dependency=redis`, `operation` = `idempotency_get` / `idempotency_set`; writes continue on Postgres) |
 | `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/*` `main` and `startup.Serve` |
 | `app.panic` | C5 | error | – | `api.Recovery` |
 | `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `service.LedgerService.OpenAccount` / `OpenLedger` / `EnsureSystemLedgers` |
 | `ledger.credit`, `ledger.debit` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `currency_unsupported`, `account_not_found`, `insufficient_funds`, `account_frozen`, `ledger_not_found`; failure: `pg_error` (Tx1 did not commit); partial: `tx2_timeout`, `tx2_error` (Tx1 committed, the transaction stays PENDING for the sweeper) | `service.LedgerService.Credit` / `Debit` (validation, Tx1) and `Process` (terminal state, once) |
 | `ledger.void` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `transaction_not_found`, `not_voidable` (another void in flight or settled: no transaction; original not SETTLED or itself a VOID: FAILED transaction), `insufficient_funds` (§16 Q3); failure: `pg_error`; partial: `tx2_timeout`, `tx2_error` | `service.LedgerService.Void` (validation, Tx1) and `Process` (terminal state, once). Carries `original_transaction_id` |
-| `ledger.idempotency` | C1 | success=info (replay), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (key claim in Tx1) |
+| `ledger.idempotency` | C1 | success=info (replay, with `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (Redis fast path, or key claim in Tx1) |
 | `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.Clients.Require` (ledger-api internal routes) |
 
 ### Current gaps (existing code predates this convention)
