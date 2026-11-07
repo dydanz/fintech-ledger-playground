@@ -121,7 +121,7 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `auth.token` | C1 | denied=warn, failure=error | `missing_token`, `malformed_token`, `invalid_or_expired`, `session_store_error` | `api.Auth` middleware |
 | `audit.revoke` | C3 | success=info, partial=error, failure=warn | `pg_update_failed`, `no_open_record`, `orphan_compensation_failed` | `service.AuthService.Login` / `Logout` |
 | `user.profile_update` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `not_found`, `pg_error` | `service.UserService.UpdateProfile` |
-| `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `startup.Retry` (every `cmd/*`) |
+| `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `startup.Retry` (every `cmd/*`); `dependency` is `postgres`, `redis` or `kafka` (`kafka.Producer.Connect`) |
 | `dependency.call` | C4 | failure=warn (degraded, fell back) | `timeout`, `refused`, `unknown` | `service.LedgerService` idempotency cache (`dependency=redis`, `operation` = `idempotency_get` / `idempotency_set`; writes continue on Postgres) |
 | `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/*` `main` and `startup.Serve` |
 | `app.panic` | C5 | error | – | `api.Recovery` |
