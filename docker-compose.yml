@@ -53,7 +53,7 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
       # client_id:sha256(token):ops;...  The default holds the dev tokens from .env.example.
-      LEDGER_CLIENTS: ${LEDGER_CLIENTS:-onboarding:a8c31043ceb39b82f03c6095246e32adf5212405f8120dfba3a0da352ba9b933:account_open,read;payments:8d1ae9dffc3b7a38a480abbc728a279204e08ea8d60189b01cbee0fef1732bfa:credit,debit,read;ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21:account_open,credit,debit,void,freeze,unfreeze,read}
+      LEDGER_CLIENTS: ${LEDGER_CLIENTS:-onboarding:a8c31043ceb39b82f03c6095246e32adf5212405f8120dfba3a0da352ba9b933:account_open,read;payments:8d1ae9dffc3b7a38a480abbc728a279204e08ea8d60189b01cbee0fef1732bfa:credit,debit,read;ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21:account_open,credit,debit,void,freeze,unfreeze,read;fraud-engine:3bdbcf9e9cfbca308c91ab7b78bc6a1738f5ab8c13241d00ecb6371a0d10630d:freeze}
       LEDGER_OVERDRAFT_CLIENTS: ${LEDGER_OVERDRAFT_CLIENTS:-ops}
       LEDGER_UNFREEZE_CLIENTS: ${LEDGER_UNFREEZE_CLIENTS:-ops}
       LEDGER_CURRENCIES: ${LEDGER_CURRENCIES:-IDR}
@@ -153,6 +153,44 @@ services:
       kafka:
         condition: service_healthy
     restart: "no"
+
+  fraud-engine:
+    build:
+      context: .
+      args:
+        CMD: fraud-engine
+    image: fraud-engine:local
+    environment:
+      SERVICE_NAME: fraud-engine
+      FRAUD_HTTP_ADDR: ":8083"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC_EVENTS: ${KAFKA_TOPIC_EVENTS:-ledger.events.v1}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
+      LEDGER_API_URL: http://ledger-api:8081
+      # Matches the fraud-engine entry in LEDGER_CLIENTS (freeze only).
+      FRAUD_CLIENT_TOKEN: ${FRAUD_CLIENT_TOKEN:-dev-fraud-token}
+      FRAUD_TOPUP_MAX: ${FRAUD_TOPUP_MAX:-3}
+      FRAUD_TOPUP_WINDOW: ${FRAUD_TOPUP_WINDOW:-5m}
+      FRAUD_DEBIT_WINDOW: ${FRAUD_DEBIT_WINDOW:-1h}
+      FRAUD_DEBIT_MAX_COUNT: ${FRAUD_DEBIT_MAX_COUNT:-30}
+      FRAUD_DEBIT_LIMITS: ${FRAUD_DEBIT_LIMITS:-IDR:50000000}
+      FRAUD_FREEZE_RETRY: ${FRAUD_FREEZE_RETRY:-30s}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      ledger-api:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
   # `make load` only (profile): k6 inside the compose network.
   k6:

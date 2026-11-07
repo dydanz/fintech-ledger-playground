@@ -2,7 +2,7 @@
   "uid": "ledger-overview",
   "title": "ledger overview",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -131,7 +131,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (event, outcome, reason) (count_over_time({service=~\"ledger-api|ledger-worker\", level=\"error\"} | json | event=~\"ledger\\\\..+\" [5m]))",
+          "expr": "sum by (event, outcome, reason) (count_over_time({service=~\"ledger-api|ledger-worker|fraud-engine\", level=\"error\"} | json | event=~\"ledger\\\\..+\" [5m]))",
           "legendFormat": "{{event}} {{outcome}} {{reason}}"
         }
       ],
@@ -582,9 +582,9 @@
       }
     },
     {
-      "id": 104,
+      "id": 105,
       "type": "row",
-      "title": "Logs",
+      "title": "Fraud engine",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -595,16 +595,16 @@
       }
     },
     {
-      "id": 7,
-      "type": "logs",
-      "title": "Recent errors (ledger-api, ledger-worker)",
+      "id": 18,
+      "type": "timeseries",
+      "title": "Fraud decisions by rule and outcome",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
-        "h": 9,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 67
       },
@@ -615,7 +615,93 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=~\"ledger-api|ledger-worker\", level=\"error\"} | json"
+          "expr": "sum by (rule, outcome, reason) (count_over_time({service=\"fraud-engine\"} | json | event=\"fraud.decision\" [5m]))",
+          "legendFormat": "{{rule}} {{outcome}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Commit → freeze latency (ms), target p99 < 2000",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 67
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.99, {service=\"fraud-engine\"} | json | event=\"fraud.decision\" | outcome=\"success\" | unwrap detect_ms [15m]) by (rule)",
+          "legendFormat": "p99 {{rule}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.5, {service=\"fraud-engine\"} | json | event=\"fraud.decision\" | outcome=\"success\" | unwrap detect_ms [15m]) by (rule)",
+          "legendFormat": "p50 {{rule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 104,
+      "type": "row",
+      "title": "Logs",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      }
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Recent errors (ledger-api, ledger-worker, fraud-engine)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=~\"ledger-api|ledger-worker|fraud-engine\", level=\"error\"} | json"
         }
       ],
       "options": {
@@ -636,7 +722,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 85
       },
       "targets": [
         {
@@ -645,7 +731,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=~\"ledger-api|ledger-worker\"} | json | event=~\"dependency\\\\.(connect|call)|app\\\\..+\""
+          "expr": "{service=~\"ledger-api|ledger-worker|fraud-engine\"} | json | event=~\"dependency\\\\.(connect|call)|app\\\\..+\""
         }
       ],
       "options": {

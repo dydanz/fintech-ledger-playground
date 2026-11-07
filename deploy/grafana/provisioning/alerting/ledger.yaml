@@ -1,5 +1,5 @@
 # Ledger alert rules (spec/TRD §11.3), evaluated by Grafana against Loki.
-# Reconcile, partition and fraud alerts land with their phases (P4, P5).
+# Reconcile and partition alerts land with P5.
 # Severity: page = act now; ticket = next working day. No contact point is
 # configured here: route `severity` in your environment's notification policy.
 apiVersion: 1
@@ -104,3 +104,33 @@ groups:
           description: >-
             Tx2 could not complete for at least LEDGER_PENDING_MAX_AGE. Look at ledger.recover failures and
             lock timeouts; clients get a 500 processing_timeout on retry.
+
+      - uid: ledger-fraud-freeze-failing
+        title: Fraud engine cannot freeze accounts
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="fraud-engine"} | json | event="fraud.decision" | outcome="failure" [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: page, service: fraud-engine}
+        annotations:
+          summary: '{{ if and $values.A $values.A.Value }}{{ $values.A.Value }}{{ else }}Some{{ end }} fraud freeze(s) failed in 5 minutes.'
+          description: >-
+            A rule fired but the account was not frozen. freeze_call_failed: ledger-api unreachable or failing
+            (the engine keeps retrying and does not commit the offset). freeze_rejected: a 4xx, usually the
+            fraud-engine token or its freeze grant in LEDGER_CLIENTS (the event was skipped).

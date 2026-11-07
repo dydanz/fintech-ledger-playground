@@ -109,7 +109,8 @@ type Consumer struct {
 	cl *kgo.Client
 }
 
-// NewConsumer joins group on topic. Offsets are committed only by Commit,
+// NewConsumer joins group on topic, reading committed records only.
+// Offsets are committed only by Commit,
 // after the caller has processed a batch, so a crash re-delivers rather
 // than skips (consumers deduplicate on event_id).
 func NewConsumer(brokers []string, group, topic string, opts ...kgo.Opt) (*Consumer, error) {
@@ -119,6 +120,7 @@ func NewConsumer(brokers []string, group, topic string, opts ...kgo.Opt) (*Consu
 		kgo.ConsumeTopics(topic),
 		kgo.DisableAutoCommit(),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.FetchIsolationLevel(kgo.ReadCommitted()), // TRD §7.4; harmless with the idempotent (non-transactional) relay
 	}, opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka consumer: %w", err)

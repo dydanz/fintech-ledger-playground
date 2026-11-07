@@ -259,6 +259,90 @@ func LoadWorker() (WorkerConfig, error) {
 	return cfg, errors.Join(errs...)
 }
 
+// FraudConfig is the configuration of cmd/fraud-engine (TRD §12.2).
+type FraudConfig struct {
+	ServiceName     string
+	HTTPAddr        string // /healthz and /readyz only
+	LogLevel        slog.Level
+	ShutdownTimeout time.Duration
+	KafkaBrokers    []string
+	EventsTopic     string
+	Group           string
+	RedisAddr       string
+	RedisPassword   string
+	RedisDB         int
+	LedgerAPIURL    string
+	ClientToken     string // FRAUD_CLIENT_TOKEN: this engine's ledger-api service token; never logged
+	FreezeRetry     time.Duration
+	TopupMax        int
+	TopupWindow     time.Duration
+	DebitWindow     time.Duration
+	DebitMaxCount   int
+	DebitLimits     map[string]int64
+}
+
+// LoadFraud reads the fraud-engine environment. The thresholds are TRD §16
+// Q7; their production values are tracked in the P4 issue.
+func LoadFraud() (FraudConfig, error) {
+	var errs []error
+	cfg := FraudConfig{
+		ServiceName:   getEnv("SERVICE_NAME", "fraud-engine"),
+		HTTPAddr:      getEnv("FRAUD_HTTP_ADDR", ":8083"),
+		KafkaBrokers:  splitList(getEnv("KAFKA_BROKERS", "localhost:9094")),
+		EventsTopic:   getEnv("KAFKA_TOPIC_EVENTS", "ledger.events.v1"),
+		Group:         getEnv("FRAUD_CONSUMER_GROUP", "fraud-engine"),
+		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword: os.Getenv("REDIS_PASSWORD"),
+		LedgerAPIURL:  getEnv("LEDGER_API_URL", "http://localhost:8081"),
+		ClientToken:   os.Getenv("FRAUD_CLIENT_TOKEN"),
+	}
+	if err := cfg.LogLevel.UnmarshalText([]byte(getEnv("LOG_LEVEL", "info"))); err != nil {
+		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
+	}
+	if cfg.ClientToken == "" {
+		errs = append(errs, errors.New("FRAUD_CLIENT_TOKEN is required"))
+	}
+	if len(cfg.KafkaBrokers) == 0 {
+		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
+	}
+	var err error
+	for _, n := range []struct {
+		dst      *int
+		key      string
+		def, low int
+	}{
+		{&cfg.RedisDB, "REDIS_DB", 0, 0},
+		{&cfg.TopupMax, "FRAUD_TOPUP_MAX", 3, 1},
+		{&cfg.DebitMaxCount, "FRAUD_DEBIT_MAX_COUNT", 30, 1},
+	} {
+		if *n.dst, err = getInt(n.key, n.def); err != nil {
+			errs = append(errs, err)
+		} else if *n.dst < n.low {
+			errs = append(errs, fmt.Errorf("%s must be at least %d", n.key, n.low))
+		}
+	}
+	for _, d := range []struct {
+		dst *time.Duration
+		key string
+		def time.Duration
+	}{
+		{&cfg.ShutdownTimeout, "SHUTDOWN_TIMEOUT", 15 * time.Second},
+		{&cfg.FreezeRetry, "FRAUD_FREEZE_RETRY", 30 * time.Second},
+		{&cfg.TopupWindow, "FRAUD_TOPUP_WINDOW", 5 * time.Minute},
+		{&cfg.DebitWindow, "FRAUD_DEBIT_WINDOW", time.Hour},
+	} {
+		if *d.dst, err = getDuration(d.key, d.def); err != nil {
+			errs = append(errs, err)
+		} else if *d.dst <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be positive", d.key))
+		}
+	}
+	if cfg.DebitLimits, err = ParseCurrencyLimits(getEnv("FRAUD_DEBIT_LIMITS", "IDR:50000000")); err != nil {
+		errs = append(errs, err)
+	}
+	return cfg, errors.Join(errs...)
+}
+
 // ParseCurrencyLimits parses FRAUD_DEBIT_LIMITS: "IDR:50000000,USD:5000",
 // amounts in minor units. A currency may appear once; empty means no limits.
 func ParseCurrencyLimits(v string) (map[string]int64, error) {

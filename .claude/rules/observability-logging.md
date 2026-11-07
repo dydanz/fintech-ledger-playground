@@ -77,7 +77,7 @@ log.ErrorContext(ctx, "session deleted but audit revoke failed",
 
 ## 5. Signals: making events observable
 
-- A new **error-level** event MUST get a panel or alert query in the dashboard of the service that emits it, keyed on `event` (and `reason` where useful): `deploy/grafana/dashboards/auth-api.json` for auth-api, `deploy/grafana/dashboards/ledger.json` for `ledger.*`, `outbox.*` and `fraud.*` events (ledger-api and ledger-worker).
+- A new **error-level** event MUST get a panel or alert query in the dashboard of the service that emits it, keyed on `event` (and `reason` where useful): `deploy/grafana/dashboards/auth-api.json` for auth-api, `deploy/grafana/dashboards/ledger.json` for `ledger.*`, `outbox.*` and `fraud.*` events (ledger-api, ledger-worker, fraud-engine).
   ```logql
   sum by (reason) (count_over_time({service="auth-api", level="error"} | json | event="audit.revoke" [5m]))
   ```
@@ -123,7 +123,7 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `audit.revoke` | C3 | success=info, partial=error, failure=warn | `pg_update_failed`, `no_open_record`, `orphan_compensation_failed` | `service.AuthService.Login` / `Logout` |
 | `user.profile_update` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `not_found`, `pg_error` | `service.UserService.UpdateProfile` |
 | `dependency.connect` | C4 | success=info, failure=warn (retrying) / error (gave up) | `timeout`, `refused`, `auth_failed`, `unknown` | `startup.Retry` (every `cmd/*`); `dependency` is `postgres`, `redis` or `kafka` (`kafka.Producer.Connect`) |
-| `dependency.call` | C4 | failure=warn (degraded, fell back) | `timeout`, `refused`, `unknown` | `service.LedgerService` idempotency cache (`dependency=redis`, `operation` = `idempotency_get` / `idempotency_set`; writes continue on Postgres) |
+| `dependency.call` | C4 | failure=warn (degraded, fell back, or retrying) | `timeout`, `refused`, `unknown` | `service.LedgerService` idempotency cache (`dependency=redis`, `operation` = `idempotency_get` / `idempotency_set`; writes continue on Postgres); `fraud.Engine` (`redis`: `fraud_seen`, `fraud_window`, `fraud_mark_seen`; `kafka`: `fraud_poll`, `fraud_commit`; retried until it succeeds) |
 | `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/*` `main` and `startup.Serve` |
 | `app.panic` | C5 | error | – | `api.Recovery` |
 | `app.leader` | C5 | success=info (`state` = `acquired` / `released`), failure=warn (retried) | `pg_error`, `connection_lost` | `worker.Runner` (ledger-worker; carries `job`) |
@@ -136,6 +136,8 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `outbox.publish` | C4 | failure=warn (retrying), error (still failing after 1 minute; it keeps retrying) | `kafka_unavailable`, `kafka_rejected`, `pg_error` | `outbox.Relay` (ledger-worker). Carries `retry_in`, `failing_ms`; success is not logged (the lag event shows progress) |
 | `outbox.lag` | C4 | info; warn when `lag_ms` > 5000; failure=warn | failure: `pg_error` | `outbox.Relay`, every 30 s (`pending`, `lag_ms`) |
 | `outbox.purge` | C2 | success=info (only when rows were deleted, with `deleted`), failure=error | `pg_error` | `outbox.Relay.Purge` (ledger-worker; published rows older than `OUTBOX_RETENTION`) |
+| `fraud.decision` | C1 | success=warn (freeze applied), failure=error | `freeze_call_failed` (ledger-api unreachable or 5xx past `FRAUD_FREEZE_RETRY`; still retrying, offset not committed), `freeze_rejected` (4xx: token, grant or account; skipped) | `fraud.Engine` (fraud-engine). Carries `rule`, `account_id`, `transaction_id`, `count`, `window_start`, `attempts`, `detect_ms` (event commit → freeze); `currency`/`amount` for `debit_volume`; never the free-text reason |
+| `fraud.event` | C4 | failure=warn | `malformed_event` (skipped) | `fraud.Engine` |
 | `ledger.idempotency` | C1 | success=info (replay, with `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (Redis fast path, or key claim in Tx1) |
 | `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.Clients.Require` (ledger-api internal routes) |
 

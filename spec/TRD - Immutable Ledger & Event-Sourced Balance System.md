@@ -610,6 +610,16 @@ Implemented in P2.3:
   - The trace continues from the `traceparent` header of the triggering event: same `trace_id`, new span.
   - The call is retried with backoff for up to `FRAUD_FREEZE_RETRY` (default 30s). After that the engine emits `fraud.decision` with outcome `failure` and **does not commit the offset**, so the event is re-evaluated.
 - **Latency target.** p99 under 2s from the triggering commit to the freeze commit: relay wake + consume + one API call. Debits after the freeze commit are blocked strictly (§7.1). Debits that settle inside that window are an accepted risk of asynchronous detection and appear in the `AccountFrozen` audit context.
+- **Implemented in P4.2** (`cmd/fraud-engine`, `fraud.Engine`, `fraud.HTTPFreezer`):
+  - **Batches.** A polled batch is processed in order and committed only when every event in it is handled.
+  - **Dedupe.** `fraud:seen:<event_id>` is checked first and set only after an event is fully handled. A crash between the freeze and the mark replays an idempotent freeze rather than losing one.
+  - **Idempotency key.** It is `fraud:<rule>:<account_id>:<window_start_ms>`, with the rule's `_` written as `-`, because `Idempotency-Key` allows only `[A-Za-z0-9._:-]`.
+  - **Tracing.** The engine logs each event with the event's `trace_id` and a new `span_id`, and sends the same pair as `traceparent`. `AccountFrozen` therefore carries the triggering credit's `trace_id`.
+  - **Failures.**
+    - *Transient* (network, 5xx, 409, 429): retried with backoff. Each `FRAUD_FREEZE_RETRY` that passes logs `fraud.decision` `failure` `freeze_call_failed`, and the event is never skipped.
+    - *Permanent* (other 4xx, e.g. the token or its `freeze` grant): logged as `freeze_rejected` and skipped, because retrying can't fix them. Both trigger the "fraud freeze failing" alert.
+  - **Dependencies.** Redis and Kafka errors are retried until they succeed (`dependency.call`).
+  - **Measured.** Commit → freeze took p50 about 22 ms and max about 22 ms over 10 accounts in the integration test. `fraud.decision` logs `detect_ms`.
 
 ### 7.5 Stuck-transaction sweeper
 
@@ -785,7 +795,8 @@ P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`: folder `ledger`, gro
   - **Success ratio:** the §11 formula over ledger-api access logs (POST `/internal/v1/*`; valid means not 400, 401 or 403) plus ledger-worker `processing_timeout`. No traffic means `OK`.
   - **Outbox lag:** `max_over_time(lag_ms)`. `outbox.lag` doubles as the relay's heartbeat, so no data for 2 m is `Alerting`.
   - **Stuck PENDING:** any `ledger.recover` with `processing_timeout`.
-  - **Later phases:** the reconcile, partition and fraud rules land with their own phases.
+  - **P4.2:** "fraud freeze failing" is `fraud.decision` failures > 0 in 5 m (page).
+  - **Later phases:** the reconcile and partition rules land with P5.
 - **Verification.** `make check-alerts` (`scripts/check-alerts.sh`) checks four things:
   - the rules are provisioned;
   - every dashboard query runs on Loki;
@@ -815,7 +826,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `kafka-init` | same image, one-shot | Creates `ledger.events.v1` with 12 partitions, RF 1 and 7-day retention (`--if-not-exists`, so it's safe to re-run) |
 | `ledger-api` | build with `CMD=ledger-api` | Port `8081`, `read_only`, `no-new-privileges`, depends on postgres, redis and kafka-init |
 | `ledger-worker` | build with `CMD=ledger-worker` | — |
-| `fraud-engine` | build with `CMD=fraud-engine` | — |
+| `fraud-engine` | build with `CMD=fraud-engine` | No published port; `/healthz` and `/readyz` on `:8083`; depends on redis, kafka-init and ledger-api. Its token is the `fraud-engine` entry in `LEDGER_CLIENTS` (`freeze` only) |
 
 - Postgres gains mounts of `./migrations/002_ledger.up.sql` and `003_idempotency_response_bytes.up.sql` in `docker-entrypoint-initdb.d/`.
 - **System ledgers for every configured currency.** Migration 002 seeds `topup_clearing` and `settlement` for `IDR` only. `LedgerService.EnsureSystemLedgers` creates any missing ones for `LEDGER_CURRENCIES` at `ledger-api` startup; it's idempotent and safe across replicas.
@@ -847,6 +858,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `FRAUD_TOPUP_MAX` / `FRAUD_TOPUP_WINDOW` | `3` / `5m` | fraud |
 | `FRAUD_DEBIT_WINDOW` / `FRAUD_DEBIT_MAX_COUNT` / `FRAUD_DEBIT_LIMITS` | `1h` / `30` / `IDR:50000000` | fraud |
 | `FRAUD_FREEZE_RETRY` | `30s` | fraud |
+| `FRAUD_CONSUMER_GROUP` / `FRAUD_HTTP_ADDR` | `fraud-engine` / `:8083` | fraud |
 
 Plus the existing `SERVICE_NAME`, `DATABASE_URL`, `REDIS_*`, `LOG_LEVEL`, `TRUSTED_PROXIES` and `SHUTDOWN_TIMEOUT`. Secrets (`LEDGER_CLIENTS` hashes, tokens) come from `.env` and are never logged.
 
