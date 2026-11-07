@@ -788,7 +788,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | Service | Image | Notes |
 | :--- | :--- | :--- |
 | `kafka` | `apache/kafka:4.1.0` | KRaft single node, `auto.create.topics.enable=false`, healthcheck, `logging: alloy` |
-| `kafka-init` | same image, one-shot | Creates `ledger.events.v1` with 12 partitions and RF 1 |
+| `kafka-init` | same image, one-shot | Creates `ledger.events.v1` with 12 partitions, RF 1 and 7-day retention (`--if-not-exists`, so it's safe to re-run) |
 | `ledger-api` | build with `CMD=ledger-api` | Port `8081`, `read_only`, `no-new-privileges`, depends on postgres, redis and kafka-init |
 | `ledger-worker` | build with `CMD=ledger-worker` | — |
 | `fraud-engine` | build with `CMD=fraud-engine` | — |
@@ -797,6 +797,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 - **System ledgers for every configured currency.** Migration 002 seeds `topup_clearing` and `settlement` for `IDR` only. `LedgerService.EnsureSystemLedgers` creates any missing ones for `LEDGER_CURRENCIES` at `ledger-api` startup; it's idempotent and safe across replicas.
 - **Caveat.** Init scripts run only on an empty volume, so existing environments need `make reset`. Adopting a migration runner (e.g. `golang-migrate` as a one-shot service) is recommended before a third migration; tracked in §16 Q11.
 - New Makefile targets: `test-integration`, `load` (k6), `kafka-topics`, `logs-ledger`.
+- **Kafka listeners (P3.1).** Containers use `kafka:9092`. The host uses `127.0.0.1:9094` (the `HOST` listener), which is what integration tests reach through `TEST_KAFKA_BROKERS`. The controller listens on `:9093`, internal only. No binary depends on `kafka-init` until the relay in P3.2 does (`ledger-worker`).
 
 ### 12.2 Configuration (env)
 

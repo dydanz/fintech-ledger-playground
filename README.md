@@ -17,6 +17,7 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 | Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview** |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |
+| Kafka | `127.0.0.1:9094` from the host (containers use `kafka:9092`); topic `ledger.events.v1`, 12 partitions. `make kafka-topics` describes it |
 
 ## API
 
@@ -157,6 +158,7 @@ cmd/ledger-worker/    ledger-worker entrypoint (sweeper, idempotency purge)
 internal/startup/     dependency retry, graceful serve, container healthcheck (shared by cmd/*)
 internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)
 internal/idempotency/ Idempotency-Key hashing, request fingerprints, Redis replay cache
+internal/kafka/      franz-go producer (acks=all, idempotent) and consumer-group wrappers
 internal/outbox/      Kafka envelope written to ledger.outbox
 internal/api/         router, middleware (request ctx, access log, recovery, auth), handlers
 internal/service/     auth, profile and ledger business logic
@@ -186,8 +188,8 @@ The SQL and repository layer are not covered by these tests. Exercise them with 
 **Integration tests** are Go tests behind the `integration` build tag, run against a real Postgres:
 
 ```bash
-docker compose up -d postgres
-make test-integration   # TEST_DATABASE_URL defaults to the compose Postgres
+docker compose up -d postgres kafka kafka-init
+make test-integration   # TEST_DATABASE_URL / TEST_KAFKA_BROKERS default to the compose Postgres and Kafka
 ```
 
 `pgtest.New(t)` (in `internal/testutil/pgtest`) creates a throwaway database for each test, applies every `migrations/*.up.sql` in order, and drops the database afterwards. Tests are skipped when `TEST_DATABASE_URL` is unset. The role needs `CREATEDB`, which the compose `auth` role has.
