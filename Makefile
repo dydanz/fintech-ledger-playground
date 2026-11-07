@@ -1,4 +1,4 @@
-.PHONY: up down reset logs logs-ledger logs-worker kafka-topics test test-integration vet smoke smoke-ledger psql
+.PHONY: up down reset logs logs-ledger logs-worker kafka-topics load test test-integration vet smoke smoke-ledger psql
 
 up:
 	docker compose up -d --build
@@ -17,6 +17,9 @@ logs-ledger:
 
 logs-worker:
 	docker compose logs -f ledger-worker
+
+load: ## k6 credits at RATE/s for DURATION; prints the max outbox lag (needs make up)
+	./scripts/load/outbox-lag.sh 60 & docker compose --profile load run --rm k6 run /scripts/ledger-credits.js; wait
 
 kafka-topics: ## topics, partitions and configs on the local broker
 	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe

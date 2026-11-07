@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"auth-api/internal/startup"
@@ -19,6 +20,7 @@ import (
 // Record is one message to publish. Key decides the partition: the relay
 // keys by account_id so one account's events stay in order (§7.3).
 type Record struct {
+	Topic   string // "" for the producer's default topic
 	Key     string
 	Value   []byte
 	Headers map[string]string
@@ -75,13 +77,21 @@ func (p *Producer) Publish(ctx context.Context, recs []Record) error {
 	}
 	krs := make([]*kgo.Record, len(recs))
 	for i, r := range recs {
-		kr := &kgo.Record{Key: []byte(r.Key), Value: r.Value}
+		kr := &kgo.Record{Topic: r.Topic, Key: []byte(r.Key), Value: r.Value}
 		for k, v := range r.Headers {
 			kr.Headers = append(kr.Headers, kgo.RecordHeader{Key: k, Value: []byte(v)})
 		}
 		krs[i] = kr
 	}
 	return p.cl.ProduceSync(ctx, krs...).FirstErr()
+}
+
+// IsRejected reports whether err is the broker refusing records (a
+// non-retriable Kafka error such as an oversized record or an unknown
+// topic) rather than the broker being unreachable.
+func IsRejected(err error) bool {
+	var ke *kerr.Error
+	return errors.As(err, &ke) && !ke.Retriable
 }
 
 // Ping checks a broker is reachable.

@@ -105,3 +105,35 @@ func TestLeaderConnectionLossFailsOver(t *testing.T) {
 		t.Fatalf("advisory lock holders = %d, want 1 (%v)", holders, err)
 	}
 }
+
+// A job that runs until its context ends (the relay) is stopped as soon as
+// the leader's lock connection dies, before another replica can lead.
+func TestLongRunningJobStopsWhenLeaseIsLost(t *testing.T) {
+	pool := pgtest.New(t)
+	stopped := make(chan struct{}, 1)
+	r := worker.NewRunner(pool, worker.Job{Name: "relay", Interval: 10 * time.Millisecond,
+		Run: func(ctx context.Context) error {
+			<-ctx.Done()
+			select {
+			case stopped <- struct{}{}:
+			default:
+			}
+			return nil
+		}})
+	r.AcquireEvery, r.LeaseCheck = time.Hour, 20*time.Millisecond // no re-acquire within the test
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go r.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_locks
+		WHERE locktype = 'advisory' AND granted AND pid <> pg_backend_pid()
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("job kept running after its lease was lost")
+	}
+}

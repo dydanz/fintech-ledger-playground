@@ -5,47 +5,17 @@ package kafka_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"auth-api/internal/kafka"
+	"auth-api/internal/testutil/kafkatest"
 )
 
-// newTopic creates a throwaway topic on the compose broker (TEST_KAFKA_BROKERS)
-// and deletes it when the test ends.
-func newTopic(t *testing.T, partitions int32) ([]string, string) {
-	t.Helper()
-	v := os.Getenv("TEST_KAFKA_BROKERS")
-	if v == "" {
-		t.Skip("TEST_KAFKA_BROKERS not set; run `make test-integration` with kafka up")
-	}
-	brokers := kafka.SplitBrokers(v)
-	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	adm := kadm.NewClient(cl)
-	topic := fmt.Sprintf("test.%s.%d", t.Name(), time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if _, err := adm.CreateTopic(ctx, partitions, 1, nil, topic); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = adm.DeleteTopics(ctx, topic)
-		cl.Close()
-	})
-	return brokers, topic
-}
-
 func TestProduceConsumeRoundTrip(t *testing.T) {
-	brokers, topic := newTopic(t, 12)
+	brokers, topic := kafkatest.NewTopic(t, 12)
 	p, err := kafka.NewProducer(brokers, topic)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +85,7 @@ func TestProduceConsumeRoundTrip(t *testing.T) {
 
 // Without a commit, a restarted consumer gets the batch again (at-least-once).
 func TestUncommittedIsRedelivered(t *testing.T) {
-	brokers, topic := newTopic(t, 1)
+	brokers, topic := kafkatest.NewTopic(t, 1)
 	p, _ := kafka.NewProducer(brokers, topic)
 	defer p.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -137,7 +107,7 @@ func TestUncommittedIsRedelivered(t *testing.T) {
 }
 
 func TestPublishToMissingTopicFails(t *testing.T) {
-	brokers, _ := newTopic(t, 1)
+	brokers, _ := kafkatest.NewTopic(t, 1)
 	p, _ := kafka.NewProducer(brokers, "does.not.exist", kgo.RecordDeliveryTimeout(3*time.Second))
 	defer p.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

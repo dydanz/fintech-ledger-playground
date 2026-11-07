@@ -83,6 +83,8 @@ services:
     environment:
       SERVICE_NAME: ledger-worker
       WORKER_HTTP_ADDR: ":8082"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC_EVENTS: ${KAFKA_TOPIC_EVENTS:-ledger.events.v1}
       DATABASE_URL: postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/${POSTGRES_DB:-auth}?sslmode=disable
       LEDGER_CURRENCIES: ${LEDGER_CURRENCIES:-IDR}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -90,6 +92,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     labels:
       logging: alloy
     logging: *logging
@@ -149,6 +153,17 @@ services:
       kafka:
         condition: service_healthy
     restart: "no"
+
+  # `make load` only (profile): k6 inside the compose network.
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: ["load"]
+    volumes:
+      - ./scripts/load:/scripts:ro
+    environment:
+      RATE: ${RATE:-300}
+      DURATION: ${DURATION:-30s}
+      ACCOUNTS: ${ACCOUNTS:-50}
 
   postgres:
     image: postgres:17-alpine

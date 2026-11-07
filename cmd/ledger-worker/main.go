@@ -1,5 +1,6 @@
-// Command ledger-worker runs the ledger's background jobs (spec/TRD §7.5):
-// the stuck-transaction sweeper and the idempotency-key purge. Every replica
+// Command ledger-worker runs the ledger's background jobs: the outbox relay
+// to Kafka (spec/TRD §7.3), the stuck-transaction sweeper (§7.5), and the
+// idempotency-key and outbox purges. Every replica
 // runs every job, but only the holder of a job's advisory lock executes it.
 package main
 
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"auth-api/internal/config"
+	"auth-api/internal/kafka"
 	"auth-api/internal/logger"
+	"auth-api/internal/outbox"
 	"auth-api/internal/repository"
 	"auth-api/internal/service"
 	"auth-api/internal/startup"
@@ -46,8 +49,9 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 	defer stop()
 	ctx = logger.WithContext(ctx, log)
 
-	// One connection per job's leader lock, plus the work itself.
-	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 8)
+	// Per job: one leader-lock connection (the relay also holds a LISTEN one),
+	// plus the work itself.
+	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 12)
 	if err != nil {
 		return err
 	}
@@ -72,7 +76,28 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 		return err
 	}
 
+	producer, err := kafka.NewProducer(cfg.KafkaBrokers, cfg.EventsTopic)
+	if err != nil {
+		return err
+	}
+	defer producer.Close()
+	if err := producer.Connect(ctx, log); err != nil {
+		return err
+	}
+	relay, err := outbox.NewRelay(repository.NewOutboxRepo(db), producer, outbox.RelayConfig{
+		PollInterval: cfg.OutboxPoll, BatchSize: cfg.OutboxBatch, LagEvery: 30 * time.Second,
+		Retention: cfg.OutboxRetention, PurgeBatch: 1000, MaxBackoff: 5 * time.Second, EscalateAfter: time.Minute,
+		PublishTimeout: cfg.OutboxPublish,
+	})
+	if err != nil {
+		return err
+	}
+
 	runner := worker.NewRunner(db,
+		// Run returns only when leadership ends; Interval is the pause before
+		// the next attempt after an unexpected return.
+		worker.Job{Name: "outbox_relay", Interval: cfg.OutboxPoll, Run: relay.Run},
+		worker.Job{Name: "outbox_purge", Interval: 10 * time.Minute, Run: relay.Purge},
 		worker.Job{Name: "sweeper", Interval: cfg.SweepInterval, Run: recovery.Sweep},
 		worker.Job{Name: "idempotency_purge", Interval: cfg.PurgeInterval, Run: recovery.PurgeIdempotencyKeys},
 	)

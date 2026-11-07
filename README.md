@@ -13,7 +13,7 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 | :--- | :--- |
 | API | http://localhost:8080 |
 | ledger-api | http://localhost:8081, bound to 127.0.0.1 only |
-| ledger-worker | no published port; background jobs (sweeper, idempotency purge) |
+| ledger-worker | no published port; background jobs (outbox relay to Kafka, sweeper, idempotency and outbox purges) |
 | Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview** |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |

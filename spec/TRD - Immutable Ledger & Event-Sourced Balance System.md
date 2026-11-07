@@ -578,6 +578,13 @@ Implemented in P2.3:
 - **Producer.** `github.com/twmb/franz-go` with idempotent production enabled (the default), `acks=all` and `linger 5ms`.
 - **Exactly-once, honestly stated.** A DB commit and a Kafka write can't be atomic. The relay guarantees **at-least-once** publishing: a crash between produce and `UPDATE` re-publishes the batch. Combined with consumer deduplication on `event_id`, this gives **effectively-once processing** (NFR reliability). The ledger itself, which is Postgres, is exactly-once by §7.1.
 - **Purge.** Published rows older than `OUTBOX_RETENTION` (default 3 days) are deleted in batches.
+- **Implemented in P3.2** (`outbox.Relay`, `repository.OutboxRepo`, the `outbox_relay` and `outbox_purge` jobs in ledger-worker):
+  - **Leadership.** `worker.Runner` now pings each leader's lock connection every second and cancels the job's context the moment that fails. The long-running relay therefore stops before another replica can lead. The remaining overlap is at most about one second of duplicates, which consumers drop on `event_id`.
+  - **LISTEN.** The relay holds its own connection for `LISTEN`. If that connection fails, it falls back to polling and re-subscribes.
+  - **Publish timeout.** Each batch is bounded by `OUTBOX_PUBLISH_TIMEOUT` (default 10 s). franz-go retries delivery indefinitely by default, so without the bound a Kafka outage would block the relay silently. The chaos check found exactly that: 70 s down with no log line.
+  - **Failures.** Failed publishes back off from `OUTBOX_POLL_INTERVAL` to 5 s. `outbox.publish` is logged at warn, and at error once failing for over a minute. Batches are never abandoned.
+  - **Purge.** It walks the primary key from the oldest row and deletes rows published before the cutoff. It stops at the first row that isn't eligible, so it needs no index on `published_at`, but an unpublished row at the head blocks it until it's relayed.
+  - **Startup.** ledger-worker waits for Kafka at startup, logging `dependency.connect` with `dependency=kafka`, as it does for Postgres.
 
 ### 7.4 Fraud engine (FR-08, FR-09)
 
@@ -811,11 +818,12 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `LEDGER_MAX_AMOUNT` | `1000000000000` | api |
 | `LEDGER_PROCESS_TIMEOUT` | `2s` | api, worker |
 | `IDEMPOTENCY_TTL` | `24h` | api, worker |
-| `KAFKA_BROKERS` | `kafka:9092` | worker, fraud |
+| `KAFKA_BROKERS` | `kafka:9092` (compose; `localhost:9094` outside it) | worker, fraud |
 | `KAFKA_TOPIC_EVENTS` | `ledger.events.v1` | worker, fraud |
 | `OUTBOX_POLL_INTERVAL` / `OUTBOX_BATCH_SIZE` / `OUTBOX_RETENTION` | `200ms` / `500` / `72h` | worker |
 | `LEDGER_SWEEP_INTERVAL` / `LEDGER_SWEEP_AFTER` / `LEDGER_PENDING_MAX_AGE` | `5s` / `5s` / `15m` | worker |
 | `IDEMPOTENCY_PURGE_INTERVAL` / `WORKER_HTTP_ADDR` | `1m` / `:8082` | worker |
+| `OUTBOX_PUBLISH_TIMEOUT` | `10s` | worker |
 | `RECONCILE_INTERVAL` | `1m` | worker |
 | `LEDGER_ARCHIVE_AFTER` / `ARCHIVE_BUCKET_URI` / `LEDGER_LEGAL_HOLD` | `61320h` (7 years) / — / empty | worker |
 | `LEDGER_API_URL` / `FRAUD_CLIENT_TOKEN` | `http://ledger-api:8081` / — | fraud |
