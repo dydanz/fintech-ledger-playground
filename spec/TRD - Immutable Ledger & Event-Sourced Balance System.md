@@ -532,6 +532,9 @@ respond 201 / 422
 - **Lock order** is always `transactions → accounts → ledgers`. For a void it is the void transaction, then the account, then the ledger, then the original transaction. Every path follows this order, so the design can't deadlock. A transaction touches exactly one user ledger, and system ledgers are never locked.
 - **Strict consistency (NFR).** Concurrent debits on the same ledger serialize on the `ledgers` row lock. Each one sees the committed balance of the previous one, so double-spending is impossible. The `ledgers_no_negative` CHECK is the last line of defence.
 - **Freezes take effect immediately (FR-09).** Freeze takes `accounts FOR UPDATE`, which conflicts with the `FOR SHARE` every Tx2 holds. Once the freeze commits, every later debit sees `FROZEN`. A debit already holding the lock finishes first, which is the correct serial order. Credits keep settling, and voids are allowed on frozen accounts (§16 Q3).
+  - **Finding (P2.3): row locks don't queue fairly.** On PG 17, a new `FOR SHARE` request is granted while a `FOR UPDATE` is waiting, as long as it's compatible with the current holders. Under steady Tx2 traffic on one account, a freeze could be starved past its `lock_timeout`, and that is exactly the fraud-burst case.
+  - **Fix.** `LockAccount` first takes a transaction-scoped advisory lock on the account: shared for `FOR SHARE`, exclusive for `FOR UPDATE`. Advisory locks are heavyweight and queued in arrival order. Once a freeze is waiting, later Tx2s wait behind it and then see `FROZEN`.
+  - **Lock order.** The order is unchanged, because the advisory lock is taken right before the account row lock. `TestFreezeIsNotStarvedByLaterTx2s` covers this.
 - **Exactly-once mutation.** A transaction id moves from PENDING to a terminal state only once, because the row lock is held and the status is re-checked. The idempotency key maps a client retry to that same transaction id.
 
 ### 7.2 Freeze and unfreeze
@@ -545,7 +548,12 @@ Tx: SELECT … FROM accounts WHERE id=$acct FOR UPDATE
 COMMIT
 ```
 
-`unfreeze` is restricted to the `ops` client by default (§16 Q6).
+`unfreeze` is restricted to the `ops` client by default (§16 Q6). It is enforced at config load: `LEDGER_CLIENTS` may grant `unfreeze` only to clients listed in `LEDGER_UNFREEZE_CLIENTS` (default `ops`), and ledger-api refuses to start otherwise.
+
+Implemented in P2.3:
+- **Bodies.** `freeze` takes `{reason, rule?}` and `unfreeze` takes `{reason}`. `reason` is 1–64 characters, stored in the event and never logged. `rule` must be one of `topup_velocity` or `debit_volume`.
+- **Response.** Both return 200 `{"account": …}`.
+- **Logging.** The `ledger.freeze` and `ledger.unfreeze` events carry `actor`, `rule` and `changed`. An idempotent no-op logs `changed=false`.
 
 ### 7.3 Outbox relay → Kafka (FR-07)
 
@@ -719,7 +727,7 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `ledger.credit` / `ledger.debit` / `ledger.void` | C2 | success=info, denied=warn, failure=error, partial=error | `invalid_input`, `currency_unsupported`, `insufficient_funds`, `account_frozen`, `not_voidable`, `ledger_not_found`, `account_not_found`, `pg_error`, `processing_timeout`; partial: `tx2_timeout`, `tx2_error` (Tx1 committed, Tx2 did not: 202, left to the sweeper) | `LedgerService.Process` (one event per terminal state); validation and Tx1 outcomes in `Credit`/`Debit` |
 | `ledger.idempotency` | C1 | success=info (replay; `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `LedgerService` (Redis fast path, or the claim in Tx1) |
 | `dependency.call` | C4 | failure=warn | `timeout`, `refused`, `unknown` | `LedgerService` idempotency cache (`dependency=redis`, `operation`); the request continues on Postgres |
-| `ledger.freeze` / `ledger.unfreeze` | C1 | success=info, failure=error | `pg_error` | `LedgerService.Freeze/Unfreeze` (includes `actor`, `rule`) |
+| `ledger.freeze` / `ledger.unfreeze` | C1 | success=info, denied=warn, failure=error | denied: `invalid_input`, `account_not_found`; failure: `pg_error`, `timeout` | `LedgerService.Freeze/Unfreeze` (includes `actor`, `rule`) |
 | `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout` | sweeper |
 | `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift` | reconciler |
 | `ledger.partition` | C5 | success=info, failure=error | `insufficient_future_partitions`, `pg_error` | partitions job |
@@ -788,6 +796,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `LEDGER_HTTP_ADDR` | `:8081` | api |
 | `LEDGER_CLIENTS` | — (required). Format `client_id:sha256hex:op,op;…` | api |
 | `LEDGER_OVERDRAFT_CLIENTS` | empty | api |
+| `LEDGER_UNFREEZE_CLIENTS` | `ops` | api |
 | `LEDGER_CURRENCIES` | `IDR` | api, worker |
 | `LEDGER_MAX_AMOUNT` | `1000000000000` | api |
 | `LEDGER_PROCESS_TIMEOUT` | `2s` | api, worker |

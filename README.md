@@ -43,6 +43,8 @@ Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_C
 | POST | `/internal/v1/accounts/:account_id/credits` `{"amount","currency","counterparty"?,"reference"?,"metadata"?}` | `credit` | `201` SETTLED, or `202` PENDING |
 | POST | `/internal/v1/accounts/:account_id/debits` (same body) | `debit` | `201` SETTLED, `422 insufficient_funds` / `account_frozen`, or `202` |
 | POST | `/internal/v1/transactions/:transaction_id/void` `{"reason"}` | `void` | `201` the SETTLED VOID (the original becomes `VOIDED`), `202`, or `422 not_voidable` / `insufficient_funds` |
+| POST | `/internal/v1/accounts/:account_id/freeze` `{"reason","rule"?}` | `freeze` | `200` account, `FROZEN`. Debits fail `account_frozen` from the moment it commits; credits and voids still settle. Idempotent if already frozen |
+| POST | `/internal/v1/accounts/:account_id/unfreeze` `{"reason"}` | `unfreeze` | `200` account, `ACTIVE` |
 | GET | `/internal/v1/accounts/:account_id`, `/internal/v1/accounts?user_id=` | `read` | `200` account with balances |
 | GET | `/internal/v1/transactions/:transaction_id` | `read` | `200` transaction |
 
@@ -58,7 +60,7 @@ End users call these with the `access_token` from auth-api's `/api/v1/auth/login
 
 Pages are keyset-paginated on `(created_at, id)`, so a transaction written while you page doesn't shift or repeat later pages. Redis isn't part of ledger-api's `/readyz`: if Redis goes down, the user routes return `503` and the internal routes keep serving on Postgres-only idempotency.
 
-Amounts are integers in the currency's minor unit (IDR has none). The dev tokens in `.env.example` are `dev-onboarding-token`, `dev-payments-token` and `dev-ops-token`; replace them anywhere but your laptop. Freeze, the Kafka relay and the fraud engine arrive in later phases (see the development plan in `spec/`).
+Amounts are integers in the currency's minor unit (IDR has none). The dev tokens in `.env.example` are `dev-onboarding-token`, `dev-payments-token` and `dev-ops-token`; replace them anywhere but your laptop. The Kafka relay and the fraud engine arrive in later phases (see the development plan in `spec/`).
 
 ## How it works
 
@@ -130,6 +132,7 @@ ledger-api reads `DATABASE_URL`, `REDIS_*` (auth-api's session store, for the us
 | `LEDGER_HTTP_ADDR` | `:8081` | |
 | `LEDGER_CLIENTS` | – (required) | `client_id:sha256(token):op,op;…` |
 | `LEDGER_OVERDRAFT_CLIENTS` | – | clients allowed to set `overdraft_limit` |
+| `LEDGER_UNFREEZE_CLIENTS` | `ops` | the only clients `LEDGER_CLIENTS` may grant `unfreeze`; startup fails otherwise |
 | `LEDGER_CURRENCIES` | `IDR` | the first one is opened with every account |
 | `LEDGER_MAX_AMOUNT` | `1000000000000` | per transaction, minor units |
 | `LEDGER_PROCESS_TIMEOUT` | `2s` | bound on each of Tx1 and Tx2; past it the client gets `202` |

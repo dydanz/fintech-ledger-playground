@@ -59,10 +59,18 @@ func (q ledgerQueries) GetAccountByUserID(ctx context.Context, userID string) (A
 	return a, wrapRead("get account by user", err)
 }
 
+// lockAccount takes a transaction-scoped advisory lock on the account, then
+// the row lock. Row locks aren't queued fairly: a new FOR SHARE is granted
+// while a FOR UPDATE waits, so steady Tx2 traffic could starve a freeze past
+// its lock_timeout. Advisory locks are queued in arrival order, so once a
+// freeze is waiting, later Tx2s wait behind it (spec/TRD §7.1).
 func (q ledgerQueries) lockAccount(ctx context.Context, id string, mode LockMode) (AccountRecord, error) {
-	lock := "FOR SHARE"
+	lock, advisory := "FOR SHARE", "pg_advisory_xact_lock_shared"
 	if mode == LockUpdate {
-		lock = "FOR UPDATE"
+		lock, advisory = "FOR UPDATE", "pg_advisory_xact_lock"
+	}
+	if _, err := q.db.Exec(ctx, `SELECT `+advisory+`(hashtextextended('ledger.account:' || $1::text, 0))`, id); err != nil {
+		return AccountRecord{}, fmt.Errorf("lock account: %w", err)
 	}
 	a, err := scanAccount(q.db.QueryRow(ctx, `SELECT `+accountColumns+` FROM ledger.accounts WHERE id = $1 `+lock, id))
 	return a, wrapRead("lock account", err)

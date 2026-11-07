@@ -304,6 +304,38 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Freezes and unfreezes by outcome and rule",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, outcome, rule) (count_over_time({service=\"ledger-api\"} | json | event=~\"ledger\\\\.(freeze|unfreeze)\" [5m]))",
+          "legendFormat": "{{event}} {{outcome}} {{rule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     }
   ]
 }

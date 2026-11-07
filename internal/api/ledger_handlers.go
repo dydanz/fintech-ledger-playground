@@ -135,6 +135,37 @@ func (h *LedgerHandlers) Void(c *gin.Context) {
 	h.respond(c, r, err)
 }
 
+type freezeRequest struct {
+	Reason string `json:"reason"`
+	Rule   string `json:"rule"`
+}
+
+type unfreezeRequest struct {
+	Reason string `json:"reason"`
+}
+
+// POST /internal/v1/accounts/:account_id/freeze
+func (h *LedgerHandlers) Freeze(c *gin.Context) {
+	var req freezeRequest
+	if !bindStrict(c, &req) {
+		return
+	}
+	r, err := h.ledger.Freeze(c.Request.Context(), service.FreezeCommand{Request: ledgerRequest(c),
+		AccountID: c.Param("account_id"), Reason: req.Reason, Rule: req.Rule})
+	h.respond(c, r, err)
+}
+
+// POST /internal/v1/accounts/:account_id/unfreeze
+func (h *LedgerHandlers) Unfreeze(c *gin.Context) {
+	var req unfreezeRequest
+	if !bindStrict(c, &req) {
+		return
+	}
+	r, err := h.ledger.Unfreeze(c.Request.Context(), service.UnfreezeCommand{Request: ledgerRequest(c),
+		AccountID: c.Param("account_id"), Reason: req.Reason})
+	h.respond(c, r, err)
+}
+
 // GET /internal/v1/accounts/:account_id
 func (h *LedgerHandlers) GetAccount(c *gin.Context) {
 	v, err := h.ledger.Account(c.Request.Context(), c.Param("account_id"))

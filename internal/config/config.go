@@ -120,6 +120,7 @@ type LedgerConfig struct {
 	ShutdownTimeout  time.Duration
 	Clients          []ClientCredential
 	OverdraftClients []string
+	UnfreezeClients  []string // the only clients LEDGER_CLIENTS may grant unfreeze (TRD §16 Q6)
 	Currencies       []string
 	MaxAmount        int64
 	ProcessTimeout   time.Duration
@@ -138,6 +139,7 @@ func LoadLedger() (LedgerConfig, error) {
 		RedisPassword:    os.Getenv("REDIS_PASSWORD"),
 		TrustedProxies:   splitList(os.Getenv("TRUSTED_PROXIES")),
 		OverdraftClients: splitList(os.Getenv("LEDGER_OVERDRAFT_CLIENTS")),
+		UnfreezeClients:  splitList(getEnv("LEDGER_UNFREEZE_CLIENTS", "ops")),
 		Currencies:       splitList(getEnv("LEDGER_CURRENCIES", "IDR")),
 		EventsTopic:      getEnv("KAFKA_TOPIC_EVENTS", "ledger.events.v1"),
 	}
@@ -166,6 +168,8 @@ func LoadLedger() (LedgerConfig, error) {
 		}
 	}
 	if cfg.Clients, err = ParseClients(os.Getenv("LEDGER_CLIENTS")); err != nil {
+		errs = append(errs, err)
+	} else if err := CheckUnfreezeGrants(cfg.Clients, cfg.UnfreezeClients); err != nil {
 		errs = append(errs, err)
 	}
 	return cfg, errors.Join(errs...)
@@ -214,6 +218,17 @@ func ParseClients(v string) ([]ClientCredential, error) {
 		return nil, errors.New("LEDGER_CLIENTS is required")
 	}
 	return out, nil
+}
+
+// CheckUnfreezeGrants rejects a LEDGER_CLIENTS that grants unfreeze to a
+// client outside allowed, so lifting a freeze stays with operations staff.
+func CheckUnfreezeGrants(clients []ClientCredential, allowed []string) error {
+	for _, c := range clients {
+		if slices.Contains(c.Operations, "unfreeze") && !slices.Contains(allowed, c.ID) {
+			return fmt.Errorf("LEDGER_CLIENTS: %s may not be granted unfreeze; LEDGER_UNFREEZE_CLIENTS allows %v", c.ID, allowed)
+		}
+	}
+	return nil
 }
 
 var (
