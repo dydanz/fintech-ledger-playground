@@ -12,7 +12,7 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 | Service | URL |
 | :--- | :--- |
 | API | http://localhost:8080 |
-| ledger-api (internal) | http://localhost:8081, bound to 127.0.0.1 only |
+| ledger-api | http://localhost:8081, bound to 127.0.0.1 only |
 | Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview** |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |
@@ -30,7 +30,9 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 
 Errors are always `{"error":{"code","message","request_id"}}`.
 
-## ledger-api (internal)
+## ledger-api
+
+### Internal routes
 
 Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_CLIENTS` maps each `client_id` to the SHA-256 of its token and the operations it may perform (`account_open`, `credit`, `debit`, `void`, `freeze`, `unfreeze`, `read`). Every mutating call needs an `Idempotency-Key` header; a retry with the same key gets the original response back byte for byte (`Idempotent-Replayed: true`), a different request with the same key gets `422 idempotency_key_reused`, and one still in flight gets `409 request_in_progress`.
 
@@ -42,6 +44,18 @@ Trusted services call it with `Authorization: Bearer <service token>`. `LEDGER_C
 | POST | `/internal/v1/accounts/:account_id/debits` (same body) | `debit` | `201` SETTLED, `422 insufficient_funds` / `account_frozen`, or `202` |
 | GET | `/internal/v1/accounts/:account_id`, `/internal/v1/accounts?user_id=` | `read` | `200` account with balances |
 | GET | `/internal/v1/transactions/:transaction_id` | `read` | `200` transaction |
+
+### User routes
+
+End users call these with the `access_token` from auth-api's `/api/v1/auth/login`; ledger-api checks it against the same Redis sessions. The account always comes from the session's `user_id`, so no route takes an `account_id`, and another user's transaction is a `404`, never a `403`.
+
+| Method | Path | Success |
+| :--- | :--- | :--- |
+| GET | `/api/v1/ledger/account` | `200` the caller's account with a balance per currency, or `404 account_not_found` |
+| GET | `/api/v1/ledger/transactions?currency=&limit=&cursor=` | `200 {"transactions":[…],"next_cursor"?}`, newest first. `limit` is 1–100 (default 20); pass `next_cursor` back as `cursor` for the next page, and its absence means the last page |
+| GET | `/api/v1/ledger/transactions/:transaction_id` | `200` transaction, or `404 transaction_not_found` if it isn't the caller's |
+
+Pages are keyset-paginated on `(created_at, id)`, so a transaction written while you page doesn't shift or repeat later pages. Redis isn't part of ledger-api's `/readyz`: if Redis goes down, the user routes return `503` and the internal routes keep serving.
 
 Amounts are integers in the currency's minor unit (IDR has none). The dev tokens in `.env.example` are `dev-onboarding-token`, `dev-payments-token` and `dev-ops-token`; replace them anywhere but your laptop. Void, freeze, the Kafka relay and the fraud engine arrive in later phases (see the development plan in `spec/`).
 
@@ -108,7 +122,7 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 | `SERVICE_NAME` | `auth-api` | value of the `service` log field |
 | `SHUTDOWN_TIMEOUT` | `15s` | graceful drain on SIGTERM |
 
-ledger-api additionally reads (TRD §12.2):
+ledger-api reads `DATABASE_URL`, `REDIS_*` (auth-api's session store, for the user routes), `LOG_LEVEL`, `SERVICE_NAME` (default `ledger-api`) and `SHUTDOWN_TIMEOUT` as above, plus (TRD §12.2):
 
 | Variable | Default | Notes |
 | :--- | :--- | :--- |

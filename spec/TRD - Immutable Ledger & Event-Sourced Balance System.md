@@ -380,6 +380,9 @@ All routes reuse `RequestContext → AccessLog → Recovery → BodyLimit`. Erro
 ### 6.1 Authentication
 
 - **User routes** (`/api/v1/ledger/*`): the existing `api.Auth` middleware with the same Redis session store as auth-api. An account is resolved from the `user_id` in the session. A user can never pass an `account_id`, which removes IDOR by construction.
+  - A transaction that belongs to another account returns 404 `transaction_not_found`, the same as one that doesn't exist, so ids can't be probed.
+  - `next_cursor` is opaque (base64url of the last row's `created_at` and `id`). Its absence marks the last page.
+  - Redis isn't part of ledger-api readiness. A Redis outage returns 503 on the user routes only; the internal write path keeps serving.
 - **Internal routes** (`/internal/v1/*`): new `api.ClientAuth` middleware.
   - Callers send `Authorization: Bearer <service token>`. The middleware SHA-256 hashes it and looks it up in `LEDGER_CLIENTS`, which maps `client_id` to a token hash and a set of allowed operations.
   - Operations are `account_open`, `credit`, `debit`, `void`, `freeze`, `unfreeze` and `read`.

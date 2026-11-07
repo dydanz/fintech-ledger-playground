@@ -44,6 +44,10 @@ func (u untouchable) GetTransaction(context.Context, string) (repository.Transac
 	u.t.Fatal("store.GetTransaction called")
 	return repository.TransactionRecord{}, nil
 }
+func (u untouchable) ListTransactions(context.Context, repository.TransactionQuery) ([]repository.TransactionRecord, error) {
+	u.t.Fatal("store.ListTransactions called")
+	return nil, nil
+}
 
 func testConfig() service.LedgerConfig {
 	return service.LedgerConfig{Currencies: []string{"IDR", "USD"}, MaxAmount: 1_000_000_000_000,
@@ -183,4 +187,24 @@ func TestOpenValidationDeniesBeforeTouchingTheStore(t *testing.T) {
 		t.Fatal("negative overdraft accepted")
 	}
 	wantEvent(t, buf, "ledger.account_open", map[string]any{"outcome": "denied", "reason": "invalid_input"})
+}
+
+func TestUserTransactionsValidatesBeforeTouchingTheStore(t *testing.T) {
+	svc, _ := service.NewLedgerService(untouchable{t}, testConfig())
+	for name, q := range map[string]service.TransactionPageQuery{
+		"limit over max":       {Limit: service.MaxPageLimit + 1},
+		"negative limit":       {Limit: -1},
+		"unsupported currency": {Currency: "EUR"},
+		"cursor not base64":    {Cursor: "%%%"},
+		"cursor without id":    {Cursor: "MjAyNi0xMS0wNVQxMDowMDowMFo"},                         // "2026-11-05T10:00:00Z"
+		"cursor bad time":      {Cursor: "eHwwMTkyZjNjNC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDE"}, // "x|<uuid>"
+	} {
+		var ve *service.ValidationError
+		if _, err := svc.UserTransactions(context.Background(), testAccount, q); !errors.As(err, &ve) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+	}
+	if _, err := svc.UserTransaction(context.Background(), testAccount, "not-a-uuid"); !errors.Is(err, service.ErrTransactionNotFound) {
+		t.Errorf("bad transaction id: err = %v", err)
+	}
 }

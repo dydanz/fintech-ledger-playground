@@ -112,6 +112,9 @@ type LedgerConfig struct {
 	ServiceName      string
 	HTTPAddr         string
 	DatabaseURL      string
+	RedisAddr        string // auth-api's session store, for the user routes
+	RedisPassword    string
+	RedisDB          int
 	LogLevel         slog.Level
 	TrustedProxies   []string
 	ShutdownTimeout  time.Duration
@@ -131,6 +134,8 @@ func LoadLedger() (LedgerConfig, error) {
 		ServiceName:      getEnv("SERVICE_NAME", "ledger-api"),
 		HTTPAddr:         getEnv("LEDGER_HTTP_ADDR", ":8081"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		RedisAddr:        getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:    os.Getenv("REDIS_PASSWORD"),
 		TrustedProxies:   splitList(os.Getenv("TRUSTED_PROXIES")),
 		OverdraftClients: splitList(os.Getenv("LEDGER_OVERDRAFT_CLIENTS")),
 		Currencies:       splitList(getEnv("LEDGER_CURRENCIES", "IDR")),
@@ -143,6 +148,9 @@ func LoadLedger() (LedgerConfig, error) {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
 	}
 	var err error
+	if cfg.RedisDB, err = getInt("REDIS_DB", 0); err != nil {
+		errs = append(errs, err)
+	}
 	if cfg.ShutdownTimeout, err = getDuration("SHUTDOWN_TIMEOUT", 15*time.Second); err != nil {
 		errs = append(errs, err)
 	}

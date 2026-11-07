@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end smoke test of ledger-api against a running stack (make up):
 # register a user on auth-api -> open account -> credit -> debit ->
-# insufficient funds -> idempotent replay -> key reuse -> auth rejections.
+# insufficient funds -> idempotent replay -> key reuse -> auth rejections ->
+# the user's own balance and history, read with an auth-api login token.
 set -euo pipefail
 
 AUTH="${AUTH_URL:-http://localhost:8080}"
@@ -40,6 +41,7 @@ ACCOUNT_ID=$(sed -E 's/.*"account":\{"id":"([^"]+)".*/\1/' "$BODY")
 code=$(post "$PAYMENTS_TOKEN" "credit-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/credits" '{"amount":1000,"currency":"IDR"}')
 expect 201 "$code" "credit 1000"
 CREDIT_BODY="$(cat "$BODY")"
+CREDIT_ID=$(json id)
 
 code=$(post "$PAYMENTS_TOKEN" "debit-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/debits" '{"amount":300,"currency":"IDR"}')
 expect 201 "$code" "debit 300"
@@ -73,5 +75,29 @@ code=$(req "$LEDGER/internal/v1/accounts/$ACCOUNT_ID" -H "Authorization: Bearer 
 expect 200 "$code" "read account"
 [[ "$(json balance)" == "700" ]] || { echo "FAIL account balance: $(cat "$BODY")"; exit 1; }
 echo "ok   account balance = 700"
+
+code=$(req -X POST "$AUTH/api/v1/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"smoke-password-123\"}")
+expect 200 "$code" "log in on auth-api"
+USER_TOKEN=$(json access_token)
+
+code=$(req "$LEDGER/api/v1/ledger/account" -H "Authorization: Bearer $USER_TOKEN")
+expect 200 "$code" "user reads own account"
+[[ "$(json balance)" == "700" ]] || { echo "FAIL user balance: $(cat "$BODY")"; exit 1; }
+echo "ok   user balance = 700"
+
+code=$(req "$LEDGER/api/v1/ledger/transactions?limit=2" -H "Authorization: Bearer $USER_TOKEN")
+expect 200 "$code" "user lists transactions (page 1: both debits)"
+CURSOR=$(json next_cursor)
+code=$(req "$LEDGER/api/v1/ledger/transactions?limit=2&cursor=$CURSOR" -H "Authorization: Bearer $USER_TOKEN")
+expect 200 "$code" "user lists transactions (page 2)"
+[[ "$(json id)" == "$CREDIT_ID" ]] || { echo "FAIL page 2 should hold the credit: $(cat "$BODY")"; exit 1; }
+echo "ok   page 2 holds the credit"
+
+code=$(req "$LEDGER/api/v1/ledger/transactions/$CREDIT_ID" -H "Authorization: Bearer $USER_TOKEN")
+expect 200 "$code" "user reads own transaction"
+
+code=$(req "$LEDGER/api/v1/ledger/account" -H "Authorization: Bearer $PAYMENTS_TOKEN")
+expect 401 "$code" "service token on a user route"
 
 echo "all ledger smoke checks passed"
