@@ -39,6 +39,35 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  ledger-api:
+    build:
+      context: .
+      args:
+        CMD: ledger-api
+    image: ledger-api:local
+    environment:
+      SERVICE_NAME: ledger-api
+      LEDGER_HTTP_ADDR: ":8081"
+      DATABASE_URL: postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/${POSTGRES_DB:-auth}?sslmode=disable
+      # client_id:sha256(token):ops;...  The default holds the dev tokens from .env.example.
+      LEDGER_CLIENTS: ${LEDGER_CLIENTS:-onboarding:a8c31043ceb39b82f03c6095246e32adf5212405f8120dfba3a0da352ba9b933:account_open,read;payments:8d1ae9dffc3b7a38a480abbc728a279204e08ea8d60189b01cbee0fef1732bfa:credit,debit,read;ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21:account_open,credit,debit,void,freeze,unfreeze,read}
+      LEDGER_OVERDRAFT_CLIENTS: ${LEDGER_OVERDRAFT_CLIENTS:-ops}
+      LEDGER_CURRENCIES: ${LEDGER_CURRENCIES:-IDR}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Internal API: never expose beyond the host (TRD §6.1).
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:

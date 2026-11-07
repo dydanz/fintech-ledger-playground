@@ -111,6 +111,9 @@ func AccessLog() gin.HandlerFunc {
 		if uid := c.GetString(ctxUserID); uid != "" {
 			attrs = append(attrs, slog.String("user_id", uid))
 		}
+		if cid := c.GetString(ctxClientID); cid != "" {
+			attrs = append(attrs, slog.String("client_id", cid))
+		}
 		if len(c.Errors) > 0 {
 			attrs = append(attrs, slog.String("error", c.Errors.String()))
 		}

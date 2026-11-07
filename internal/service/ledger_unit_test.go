@@ -32,6 +32,14 @@ func (u untouchable) GetAccount(context.Context, string) (repository.AccountReco
 	u.t.Fatal("store.GetAccount called for a request that should fail validation")
 	return repository.AccountRecord{}, nil
 }
+func (u untouchable) GetAccountByUserID(context.Context, string) (repository.AccountRecord, error) {
+	u.t.Fatal("store.GetAccountByUserID called")
+	return repository.AccountRecord{}, nil
+}
+func (u untouchable) ListUserLedgers(context.Context, string) ([]repository.LedgerRecord, error) {
+	u.t.Fatal("store.ListUserLedgers called")
+	return nil, nil
+}
 func (u untouchable) GetTransaction(context.Context, string) (repository.TransactionRecord, error) {
 	u.t.Fatal("store.GetTransaction called")
 	return repository.TransactionRecord{}, nil
@@ -116,8 +124,8 @@ func TestMoneyValidationDeniesBeforeTouchingTheStore(t *testing.T) {
 		reason string
 		err    error // nil = any *ValidationError
 	}{
-		{"missing key", func(c *service.MoneyCommand) { c.IdempotencyKey = "" }, "invalid_input", nil},
-		{"bad key", func(c *service.MoneyCommand) { c.IdempotencyKey = "has space" }, "invalid_input", nil},
+		{"missing key", func(c *service.MoneyCommand) { c.IdempotencyKey = "" }, "invalid_input", service.ErrIdempotencyKeyInvalid},
+		{"bad key", func(c *service.MoneyCommand) { c.IdempotencyKey = "has space" }, "invalid_input", service.ErrIdempotencyKeyInvalid},
 		{"no client", func(c *service.MoneyCommand) { c.ClientID = "" }, "invalid_input", nil},
 		{"bad trace", func(c *service.MoneyCommand) { c.TraceID = "x" }, "invalid_input", nil},
 		{"zero amount", func(c *service.MoneyCommand) { c.Amount = 0 }, "invalid_input", nil},

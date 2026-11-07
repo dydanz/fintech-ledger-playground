@@ -29,6 +29,11 @@ var (
 	ErrLedgerExists         = errors.New("account already has a ledger for this currency")
 	ErrIdempotencyKeyReused = errors.New("idempotency key was already used with a different request")
 	ErrRequestInProgress    = errors.New("a request with this idempotency key is still in progress")
+	ErrTransactionNotFound  = errors.New("transaction not found")
+
+	// ErrIdempotencyKeyInvalid is a ValidationError the API reports as
+	// idempotency_key_required (TRD §6.4).
+	ErrIdempotencyKeyInvalid = &ValidationError{Msg: "Idempotency-Key header is required: 1-255 characters of [A-Za-z0-9._:-]"}
 )
 
 var (
@@ -40,6 +45,8 @@ var (
 type LedgerStore interface {
 	InTx(ctx context.Context, timeout time.Duration, fn func(repository.LedgerTx) error) error
 	GetAccount(ctx context.Context, id string) (repository.AccountRecord, error)
+	GetAccountByUserID(ctx context.Context, userID string) (repository.AccountRecord, error)
+	ListUserLedgers(ctx context.Context, accountID string) ([]repository.LedgerRecord, error)
 	GetTransaction(ctx context.Context, id string) (repository.TransactionRecord, error)
 }
 
@@ -111,11 +118,60 @@ func (r Request) validate() error {
 	case r.ClientID == "":
 		return &ValidationError{Msg: "client id is required"}
 	case !idempotency.ValidKey(r.IdempotencyKey):
-		return &ValidationError{Msg: "Idempotency-Key must be 1-255 characters of [A-Za-z0-9._:-]"}
+		return ErrIdempotencyKeyInvalid
 	case !tracePattern.MatchString(r.TraceID):
 		return &ValidationError{Msg: "trace id must be 32 lowercase hex characters"}
 	}
 	return nil
+}
+
+// --- reads (no events: the access log covers them) ---
+
+// Account returns an account with its ledgers' committed balances.
+func (s *LedgerService) Account(ctx context.Context, id string) (AccountView, error) {
+	if !uuidPattern.MatchString(id) {
+		return AccountView{}, ErrAccountNotFound
+	}
+	a, err := s.store.GetAccount(ctx, id)
+	return s.accountView(ctx, a, err)
+}
+
+// AccountByUser returns the user's account (1:1).
+func (s *LedgerService) AccountByUser(ctx context.Context, userID string) (AccountView, error) {
+	if !uuidPattern.MatchString(userID) {
+		return AccountView{}, ErrAccountNotFound
+	}
+	a, err := s.store.GetAccountByUserID(ctx, userID)
+	return s.accountView(ctx, a, err)
+}
+
+func (s *LedgerService) accountView(ctx context.Context, a repository.AccountRecord, err error) (AccountView, error) {
+	if errors.Is(err, repository.ErrNotFound) {
+		return AccountView{}, ErrAccountNotFound
+	}
+	if err != nil {
+		return AccountView{}, err
+	}
+	ledgers, err := s.store.ListUserLedgers(ctx, a.ID)
+	if err != nil {
+		return AccountView{}, err
+	}
+	return ToAccountView(a, ledgers), nil
+}
+
+// Transaction returns one transaction in its current state.
+func (s *LedgerService) Transaction(ctx context.Context, id string) (TransactionView, error) {
+	if !uuidPattern.MatchString(id) {
+		return TransactionView{}, ErrTransactionNotFound
+	}
+	t, err := s.store.GetTransaction(ctx, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return TransactionView{}, ErrTransactionNotFound
+	}
+	if err != nil {
+		return TransactionView{}, err
+	}
+	return ToTransactionView(t), nil
 }
 
 // --- account and ledger open ---

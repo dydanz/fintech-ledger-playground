@@ -1,4 +1,4 @@
-.PHONY: up down reset logs test test-integration vet smoke psql
+.PHONY: up down reset logs logs-ledger test test-integration vet smoke smoke-ledger psql
 
 up:
 	docker compose up -d --build
@@ -11,6 +11,9 @@ reset: ## drop all volumes (re-runs DB init scripts on next `up`)
 
 logs:
 	docker compose logs -f api
+
+logs-ledger:
+	docker compose logs -f ledger-api
 
 test:
 	go test -race -count=1 ./...
@@ -26,6 +29,9 @@ vet:
 
 smoke:
 	./scripts/smoke.sh
+
+smoke-ledger: ## needs api and ledger-api running (make up)
+	./scripts/smoke-ledger.sh
 
 psql:
 	docker compose exec postgres psql -U auth -d auth

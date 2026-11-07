@@ -653,6 +653,8 @@ deploy/grafana/provisioning/alerting/ledger.yaml
 ```
 
 - `Process(ctx, txID)` is the single Tx2 implementation, shared by the request path and the sweeper.
+- `internal/startup` holds what every `cmd/*` binary shares: `Retry` (emits `dependency.connect`), `ConnectPostgres`, `Serve` (graceful shutdown, `app.lifecycle`) and `Healthcheck`. HTTP services share one base engine (middleware chain, JSON 404/405, `/healthz`, `/readyz`).
+- `ClientAuth` doesn't add `client_id` to the request logger: the service already puts it on its events, and `AccessLog` adds it to the request record, so no record carries the key twice.
 - In-transaction operations are the `repository.LedgerTx` interface; `LedgerRepo.InTx(ctx, timeout, fn)` runs `fn` in one READ COMMITTED transaction with `lock_timeout`/`statement_timeout` set, and returns `repository.ErrTimeout` when either fires. The interface lives in `repository` (not `service`) because the callback's parameter type must be nameable by both and `service` already imports `repository`. The service declares a `LedgerStore` interface with `InTx` and the pool-level reads, so service tests can use fakes, as the existing tests do.
 - `LedgerTx.AppendEvent` writes the `events` row, its `outbox` row and the `NOTIFY` together, so no transition can be recorded without being published (FR-07).
 - New dependencies: `github.com/google/uuid` (UUIDv7), `github.com/twmb/franz-go`, and `github.com/parquet-go/parquet-go` (archiver, P5) with an S3 client.
