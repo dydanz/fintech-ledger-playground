@@ -120,6 +120,21 @@ func (h *LedgerHandlers) money(c *gin.Context, op func(context.Context, service.
 	h.respond(c, r, err)
 }
 
+type voidRequest struct {
+	Reason string `json:"reason"`
+}
+
+// POST /internal/v1/transactions/:transaction_id/void
+func (h *LedgerHandlers) Void(c *gin.Context) {
+	var req voidRequest
+	if !bindStrict(c, &req) {
+		return
+	}
+	r, err := h.ledger.Void(c.Request.Context(), service.VoidCommand{Request: ledgerRequest(c),
+		TransactionID: c.Param("transaction_id"), Reason: req.Reason})
+	h.respond(c, r, err)
+}
+
 // GET /internal/v1/accounts/:account_id
 func (h *LedgerHandlers) GetAccount(c *gin.Context) {
 	v, err := h.ledger.Account(c.Request.Context(), c.Param("account_id"))
@@ -178,6 +193,8 @@ func (h *LedgerHandlers) fail(c *gin.Context, err error) {
 		abortError(c, http.StatusNotFound, "user_not_found", "user not found")
 	case errors.Is(err, service.ErrTransactionNotFound):
 		abortError(c, http.StatusNotFound, "transaction_not_found", "transaction not found")
+	case errors.Is(err, service.ErrNotVoidable):
+		abortError(c, http.StatusUnprocessableEntity, "not_voidable", "transaction already has a void in flight or settled")
 	case errors.Is(err, service.ErrLedgerExists):
 		abortError(c, http.StatusConflict, "ledger_exists", "account already has a ledger for this currency")
 	case errors.Is(err, service.ErrRequestInProgress):

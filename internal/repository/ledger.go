@@ -162,6 +162,7 @@ type LedgerTx interface {
 
 	InsertLedger(ctx context.Context, l LedgerRecord) error
 	GetSystemLedger(ctx context.Context, code, currency string) (LedgerRecord, error)
+	GetLedger(ctx context.Context, id string) (LedgerRecord, error)
 	LockUserLedger(ctx context.Context, accountID, currency string) (LedgerRecord, error)
 	UpdateLedgerBalance(ctx context.Context, id string, balance, lastSequence int64) error
 	ListUserLedgers(ctx context.Context, accountID string) ([]LedgerRecord, error)
@@ -280,6 +281,9 @@ func (t *pgLedgerTx) UpdateAccount(ctx context.Context, id string, status ledger
 }
 func (t *pgLedgerTx) InsertLedger(ctx context.Context, l LedgerRecord) error {
 	return t.q.insertLedger(ctx, l)
+}
+func (t *pgLedgerTx) GetLedger(ctx context.Context, id string) (LedgerRecord, error) {
+	return t.q.getLedger(ctx, id)
 }
 func (t *pgLedgerTx) GetSystemLedger(ctx context.Context, code, currency string) (LedgerRecord, error) {
 	return t.q.getSystemLedger(ctx, code, currency)

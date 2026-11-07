@@ -2,13 +2,15 @@
 # End-to-end smoke test of ledger-api against a running stack (make up):
 # register a user on auth-api -> open account -> credit -> debit ->
 # insufficient funds -> idempotent replay -> key reuse -> auth rejections ->
-# the user's own balance and history, read with an auth-api login token.
+# the user's own balance and history, read with an auth-api login token ->
+# void of the debit.
 set -euo pipefail
 
 AUTH="${AUTH_URL:-http://localhost:8080}"
 LEDGER="${LEDGER_URL:-http://localhost:8081}"
 ONBOARDING_TOKEN="${ONBOARDING_TOKEN:-dev-onboarding-token}"
 PAYMENTS_TOKEN="${PAYMENTS_TOKEN:-dev-payments-token}"
+OPS_TOKEN="${OPS_TOKEN:-dev-ops-token}"
 RUN="$(date +%s)"
 EMAIL="ledger-smoke+$RUN@example.com"
 BODY="$(mktemp)"
@@ -45,6 +47,7 @@ CREDIT_ID=$(json id)
 
 code=$(post "$PAYMENTS_TOKEN" "debit-$RUN" "/internal/v1/accounts/$ACCOUNT_ID/debits" '{"amount":300,"currency":"IDR"}')
 expect 201 "$code" "debit 300"
+DEBIT_ID=$(json id)
 [[ "$(json balance_after)" == "700" ]] || { echo "FAIL balance_after: $(cat "$BODY")"; exit 1; }
 echo "ok   balance_after = 700"
 
@@ -99,5 +102,22 @@ expect 200 "$code" "user reads own transaction"
 
 code=$(req "$LEDGER/api/v1/ledger/account" -H "Authorization: Bearer $PAYMENTS_TOKEN")
 expect 401 "$code" "service token on a user route"
+
+code=$(post "$PAYMENTS_TOKEN" "void-pay-$RUN" "/internal/v1/transactions/$DEBIT_ID/void" '{"reason":"smoke"}')
+expect 403 "$code" "payments may not void"
+
+code=$(post "$OPS_TOKEN" "void-$RUN" "/internal/v1/transactions/$DEBIT_ID/void" '{"reason":"smoke refund"}')
+expect 201 "$code" "void the debit"
+[[ "$(json balance_after)" == "1000" ]] || { echo "FAIL void balance_after: $(cat "$BODY")"; exit 1; }
+echo "ok   balance_after = 1000 after the void"
+
+code=$(post "$OPS_TOKEN" "void2-$RUN" "/internal/v1/transactions/$DEBIT_ID/void" '{"reason":"again"}')
+expect 422 "$code" "second void of the same debit"
+[[ "$(json code)" == "not_voidable" ]] || { echo "FAIL error code: $(cat "$BODY")"; exit 1; }
+
+code=$(req "$LEDGER/internal/v1/transactions/$DEBIT_ID" -H "Authorization: Bearer $OPS_TOKEN")
+expect 200 "$code" "read the voided debit"
+[[ "$(json status)" == "VOIDED" ]] || { echo "FAIL original status: $(cat "$BODY")"; exit 1; }
+echo "ok   original is VOIDED"
 
 echo "all ledger smoke checks passed"
