@@ -88,6 +88,11 @@ type TransactionSettled struct {
 	JournalEntryIDs []string `json:"journal_entry_ids"`
 	LedgerSequence  int64    `json:"ledger_sequence"`
 	BalanceAfter    int64    `json:"balance_after"`
+	// What settled, so consumers (the fraud engine) needn't join back to
+	// TransactionRequested. Added in P4.1; absent on earlier events.
+	Type     TransactionType `json:"type,omitempty"`
+	Amount   int64           `json:"amount,omitempty"`
+	Currency string          `json:"currency,omitempty"`
 }
 
 type TransactionFailed struct {

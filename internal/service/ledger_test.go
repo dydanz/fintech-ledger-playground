@@ -287,6 +287,11 @@ func TestCreditThenDebitSettle(t *testing.T) {
 	if cr.Status != "SETTLED" || *cr.BalanceAfter != 1000 || *cr.LedgerSequence != 1 || cr.TraceID != testTrace || cr.Reference != "SECRET-REF" {
 		t.Fatalf("credit = %+v", cr)
 	}
+	// The settled event says what settled, for the fraud engine (P4.1).
+	if n := e.count(`SELECT count(*) FROM ledger.events WHERE stream_id = $1 AND event_type = 'TransactionSettled'
+		AND payload->>'type' = 'CREDIT' AND (payload->>'amount')::bigint = 1000 AND payload->>'currency' = 'IDR'`, cr.ID); n != 1 {
+		t.Fatalf("TransactionSettled lacks type/amount/currency (%d)", n)
+	}
 	wantEvent(t, e.logs, "ledger.credit", map[string]any{"outcome": "success", "level": "info", "transaction_id": cr.ID,
 		"ledger_id": cr.LedgerID, "amount": float64(1000), "balance_after": float64(1000)})
 

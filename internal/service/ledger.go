@@ -787,7 +787,7 @@ func (s *LedgerService) process(ctx context.Context, in ProcessInput) (resp Resp
 				return err
 			}
 			if err := appendEvent(ledger.TransactionSettled{JournalEntryIDs: []string{user.ID, counter.ID},
-				LedgerSequence: seq, BalanceAfter: d.BalanceAfter}); err != nil {
+				LedgerSequence: seq, BalanceAfter: d.BalanceAfter, Type: rec.Type, Amount: rec.Amount, Currency: rec.Currency}); err != nil {
 				return err
 			}
 			update.Status, update.Settled = ledger.StatusSettled, true

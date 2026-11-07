@@ -174,7 +174,7 @@ Each event belongs to one stream. `(stream_id, stream_version)` is unique and st
 | :--- | :--- | :--- | :--- |
 | `transaction` | transaction id | `TransactionRequested` | `type, amount, currency, counterparty, original_transaction_id?, reference?, requested_by` |
 | | | `TransactionProcessing` | `ledger_id` |
-| | | `TransactionSettled` | `journal_entry_ids[], ledger_sequence, balance_after` |
+| | | `TransactionSettled` | `journal_entry_ids[], ledger_sequence, balance_after, type, amount, currency` (the last three added in P4.1, additive within `schema_version` 1, for the fraud engine) |
 | | | `TransactionFailed` | `reason` (§6.5 codes) |
 | | | `TransactionVoided` | `void_transaction_id` |
 | `account` | account id | `AccountOpened` | `user_id` |
@@ -599,6 +599,12 @@ Implemented in P2.3:
 | `topup_velocity` | `TransactionSettled` with `type=CREDIT` | Redis ZSET `fraud:topup:<account_id>`, score = `occurred_at` ms. Trim to the window, then `ZCARD > N`. | `N=3`, window `5m` |
 | `debit_volume` | `TransactionSettled` with `type=DEBIT` | Redis ZSET `fraud:debit:<account_id>:<currency>` (member `tx_id:amount`). Trigger when the window sum > limit or the count > max. | `1h`, limit per currency from config, `max 30` |
 
+- **Rules (implemented in P4.1, `internal/fraud`).**
+  - **Input.** The rules read `TransactionSettled`, whose payload now carries `type`, `amount` and `currency`. Voids, other events and earlier settlements without those fields are ignored.
+  - **Windows.** A window is half-open, `(end − w, end]`. Because events can arrive out of order, a late event is judged against every window that contains it, including windows ending at later events.
+  - **Storage.** Points are stored for 2 × the window, relative to each event's time, and the key expires after 2 × the window idle. An event up to one window late is still judged correctly.
+  - **Duplicates.** ZSET members are `<transaction_id>:<amount>`, so a replayed event counts once.
+  - **Decision.** It carries the start of the offending window (the earliest event in it). That makes the freeze idempotency key stable across replays.
 - **Freezing.** When a rule fires, the engine calls `POST /internal/v1/accounts/{id}/freeze`.
   - Client `fraud-engine`, with `Idempotency-Key: fraud:<rule>:<account_id>:<window_start>`.
   - The trace continues from the `traceparent` header of the triggering event: same `trace_id`, new span.

@@ -112,3 +112,18 @@ func TestLoadWorkerDefaultsAndErrors(t *testing.T) {
 		t.Fatal("zero sweep interval accepted")
 	}
 }
+
+func TestParseCurrencyLimits(t *testing.T) {
+	got, err := config.ParseCurrencyLimits(" IDR:50000000 , USD:5000 ")
+	if err != nil || got["IDR"] != 50_000_000 || got["USD"] != 5000 || len(got) != 2 {
+		t.Fatalf("got %v %v", got, err)
+	}
+	if got, err := config.ParseCurrencyLimits(""); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+	for _, bad := range []string{"IDR", "idr:5", "IDR:0", "IDR:-1", "IDR:1.5", "IDR:5,IDR:6", "IDRX:5"} {
+		if _, err := config.ParseCurrencyLimits(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

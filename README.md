@@ -159,6 +159,7 @@ internal/startup/     dependency retry, graceful serve, container healthcheck (s
 internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)
 internal/idempotency/ Idempotency-Key hashing, request fingerprints, Redis replay cache
 internal/kafka/      franz-go producer (acks=all, idempotent) and consumer-group wrappers
+internal/fraud/      velocity rules (topup_velocity, debit_volume) over event-time windows; Redis ZSET store
 internal/outbox/      Kafka envelope written to ledger.outbox
 internal/api/         router, middleware (request ctx, access log, recovery, auth), handlers
 internal/service/     auth, profile and ledger business logic
