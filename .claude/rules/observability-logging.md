@@ -72,12 +72,12 @@ log.ErrorContext(ctx, "session deleted but audit revoke failed",
 - **Service layer** (`internal/service`): owns the C1, C2 and C3 events. This is where the business outcome is known.
 - **HTTP layer** (`internal/api`): the access log covers every request. The middleware owns C1 events it decides alone (`auth.token` rejected). Handlers **don't** re-log errors the service already logged; for unexpected errors they call `c.Error(err)` so the access log records them.
 - **Repositories / session store**: **never log.** Return wrapped errors (`fmt.Errorf("insert user: %w", err)`). The caller decides the event.
-- **`cmd/api`**: owns the C5 events and the C4 startup retry events.
+- **`cmd/*`** (via `startup`): own the C5 events and the C4 startup retry events. `worker.Runner` owns `app.leader`.
 - One occurrence produces one event. Don't log an error and then return it to a caller that logs it again.
 
 ## 5. Signals: making events observable
 
-- A new **error-level** event MUST get a panel or alert query in the dashboard of the service that emits it, keyed on `event` (and `reason` where useful): `deploy/grafana/dashboards/auth-api.json` for auth-api, `deploy/grafana/dashboards/ledger.json` for `ledger.*`, `outbox.*` and `fraud.*` events.
+- A new **error-level** event MUST get a panel or alert query in the dashboard of the service that emits it, keyed on `event` (and `reason` where useful): `deploy/grafana/dashboards/auth-api.json` for auth-api, `deploy/grafana/dashboards/ledger.json` for `ledger.*`, `outbox.*` and `fraud.*` events (ledger-api and ledger-worker).
   ```logql
   sum by (reason) (count_over_time({service="auth-api", level="error"} | json | event="audit.revoke" [5m]))
   ```
@@ -125,10 +125,13 @@ This is the source of truth for event names and reasons. Add entries here in the
 | `dependency.call` | C4 | failure=warn (degraded, fell back) | `timeout`, `refused`, `unknown` | `service.LedgerService` idempotency cache (`dependency=redis`, `operation` = `idempotency_get` / `idempotency_set`; writes continue on Postgres) |
 | `app.lifecycle` | C5 | info, or error for config/startup failure | `config_invalid`, `startup_failed`, `shutdown_timeout` | `cmd/*` `main` and `startup.Serve` |
 | `app.panic` | C5 | error | – | `api.Recovery` |
+| `app.leader` | C5 | success=info (`state` = `acquired` / `released`), failure=warn (retried) | `pg_error`, `connection_lost` | `worker.Runner` (ledger-worker; carries `job`) |
 | `ledger.account_open` | C2 | success=info, denied=warn, failure=error | `invalid_input`, `user_not_found`, `account_not_found`, `currency_unsupported`, `ledger_exists`, `pg_error` | `service.LedgerService.OpenAccount` / `OpenLedger` / `EnsureSystemLedgers` |
 | `ledger.credit`, `ledger.debit` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `currency_unsupported`, `account_not_found`, `insufficient_funds`, `account_frozen`, `ledger_not_found`; failure: `pg_error` (Tx1 did not commit); partial: `tx2_timeout`, `tx2_error` (Tx1 committed, the transaction stays PENDING for the sweeper) | `service.LedgerService.Credit` / `Debit` (validation, Tx1) and `Process` (terminal state, once) |
 | `ledger.void` | C2 | success=info, denied=warn, failure=error, partial=error | denied: `invalid_input`, `transaction_not_found`, `not_voidable` (another void in flight or settled: no transaction; original not SETTLED or itself a VOID: FAILED transaction), `insufficient_funds` (§16 Q3); failure: `pg_error`; partial: `tx2_timeout`, `tx2_error` | `service.LedgerService.Void` (validation, Tx1) and `Process` (terminal state, once). Carries `original_transaction_id` |
 | `ledger.freeze`, `ledger.unfreeze` | C1 | success=info (with `changed`; `false` when already in the target state), denied=warn, failure=error | denied: `invalid_input`, `account_not_found`; failure: `pg_error`, `timeout` (lock wait exceeded `LEDGER_PROCESS_TIMEOUT`) | `service.LedgerService.Freeze` / `Unfreeze`. Carries `actor`, and `rule` on a freeze; never the free-text `reason` |
+| `ledger.recover` | C3 | success=warn (a stuck transaction was completed by the sweeper), failure=error | success: `stuck_pending` (Tx2 re-run), `processing_timeout` (older than `LEDGER_PENDING_MAX_AGE`, failed through PROCESSING); failure: `pg_error`, `timeout` | `service.Recovery.Sweep` (ledger-worker). Carries `transaction_id`, `account_id`, `age_ms`, `status`, `key_found`; the transaction's own terminal event is logged once by `Process` |
+| `ledger.purge` | C2 | success=info (only when rows were deleted, with `deleted`), failure=error | `pg_error` | `service.Recovery.PurgeIdempotencyKeys` (ledger-worker) |
 | `ledger.idempotency` | C1 | success=info (replay, with `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `service.LedgerService` (Redis fast path, or key claim in Tx1) |
 | `ledger.client_auth` | C1 | denied=warn | `missing_token`, `invalid_token`, `forbidden_operation` | `api.Clients.Require` (ledger-api internal routes) |
 

@@ -611,6 +611,13 @@ Implemented in P2.3:
   `LEDGER_SWEEP_AFTER` defaults to 5s. For each row it re-runs Tx2.
 - After `LEDGER_PENDING_MAX_AGE` (default 15m) the transaction is moved to FAILED `processing_timeout`, still through PROCESSING.
 - Each recovery emits `ledger.recover`.
+- **Implemented in P2.4** (`cmd/ledger-worker`, `service.Recovery`, `internal/worker`):
+  - **Finding the key.** The sweeper lists candidates without locking them. `Process` locks each one and re-checks that it's PENDING, so a transaction the request path finishes in the meantime is skipped quietly. It finds each transaction's idempotency key by `resource_id`, using the index from migration 004. If the key is gone, the transaction is still completed; only the stored response is skipped.
+  - **Expiry.** It moves through PROCESSING to FAILED `processing_timeout` without reading or changing a balance. The stored response is a 500 with `processing_timeout`, which a client retry replays.
+  - **Config check.** `LEDGER_SWEEP_AFTER` must be at least `LEDGER_PROCESS_TIMEOUT`, so the sweeper never races a Tx2 that's still running.
+  - **Leadership.** Each job (`sweeper`, `idempotency_purge`) is led by the holder of a session `pg_advisory_lock`. Followers retry every 5 s. A leader whose connection dies loses the lock, and another replica takes over. Leadership changes log `app.leader`.
+  - **Purge.** The idempotency purge (`IDEMPOTENCY_PURGE_INTERVAL`, default 1m) deletes expired keys in batches of 1000 and logs `ledger.purge` with `deleted`.
+  - **No Redis.** The worker doesn't use Redis. A response the sweeper completes is cached by ledger-api on its first replay.
 
 ### 7.6 Reconciler
 
@@ -728,7 +735,9 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `ledger.idempotency` | C1 | success=info (replay; `source` = `cache` or `postgres`), denied=warn | `key_reused`, `in_progress` | `LedgerService` (Redis fast path, or the claim in Tx1) |
 | `dependency.call` | C4 | failure=warn | `timeout`, `refused`, `unknown` | `LedgerService` idempotency cache (`dependency=redis`, `operation`); the request continues on Postgres |
 | `ledger.freeze` / `ledger.unfreeze` | C1 | success=info, denied=warn, failure=error | denied: `invalid_input`, `account_not_found`; failure: `pg_error`, `timeout` | `LedgerService.Freeze/Unfreeze` (includes `actor`, `rule`) |
-| `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout` | sweeper |
+| `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout`; failure: `pg_error`, `timeout` | sweeper |
+| `ledger.purge` | C2 | success=info, failure=error | `pg_error` | idempotency purge |
+| `app.leader` | C5 | success=info, failure=warn | `pg_error`, `connection_lost` | `worker.Runner` |
 | `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift` | reconciler |
 | `ledger.partition` | C5 | success=info, failure=error | `insufficient_future_partitions`, `pg_error` | partitions job |
 | `ledger.archive` | C2 | success=info, failure=error | `export_failed`, `verify_failed`, `detach_failed`, `legal_hold` | archiver |
@@ -805,6 +814,7 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `KAFKA_TOPIC_EVENTS` | `ledger.events.v1` | worker, fraud |
 | `OUTBOX_POLL_INTERVAL` / `OUTBOX_BATCH_SIZE` / `OUTBOX_RETENTION` | `200ms` / `500` / `72h` | worker |
 | `LEDGER_SWEEP_INTERVAL` / `LEDGER_SWEEP_AFTER` / `LEDGER_PENDING_MAX_AGE` | `5s` / `5s` / `15m` | worker |
+| `IDEMPOTENCY_PURGE_INTERVAL` / `WORKER_HTTP_ADDR` | `1m` / `:8082` | worker |
 | `RECONCILE_INTERVAL` | `1m` | worker |
 | `LEDGER_ARCHIVE_AFTER` / `ARCHIVE_BUCKET_URI` / `LEDGER_LEGAL_HOLD` | `61320h` (7 years) / — / empty | worker |
 | `LEDGER_API_URL` / `FRAUD_CLIENT_TOKEN` | `http://ledger-api:8081` / — | fraud |

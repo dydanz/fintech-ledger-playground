@@ -424,6 +424,40 @@ func (q ledgerQueries) completeIdempotencyKey(ctx context.Context, clientID, key
 	return k, nil
 }
 
+func (q ledgerQueries) listStuckTransactions(ctx context.Context, olderThan time.Time, limit int) ([]StuckTransaction, error) {
+	rows, err := q.db.Query(ctx,
+		`SELECT t.id, t.account_id, t.created_at, coalesce(k.client_id, ''), coalesce(k.key_hash, '')
+		   FROM ledger.transactions t
+		   LEFT JOIN ledger.idempotency_keys k
+		     ON k.resource_id = t.id AND k.client_id = t.requested_by AND k.operation IN ('credit', 'debit', 'void')
+		  WHERE t.status = 'PENDING' AND t.created_at < $1
+		  ORDER BY t.created_at
+		  LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list stuck transactions: %w", err)
+	}
+	defer rows.Close()
+	var out []StuckTransaction
+	for rows.Next() {
+		var s StuckTransaction
+		if err := rows.Scan(&s.ID, &s.AccountID, &s.CreatedAt, &s.ClientID, &s.KeyHash); err != nil {
+			return nil, fmt.Errorf("list stuck transactions: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, wrapRead("list stuck transactions", rows.Err())
+}
+
+func (q ledgerQueries) purgeIdempotencyKeys(ctx context.Context, limit int) (int64, error) {
+	tag, err := q.db.Exec(ctx,
+		`DELETE FROM ledger.idempotency_keys
+		  WHERE ctid IN (SELECT ctid FROM ledger.idempotency_keys WHERE expires_at <= now() LIMIT $1)`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("purge idempotency keys: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // --- helpers ---
 
 func pgCode(err error) string {

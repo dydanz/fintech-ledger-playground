@@ -175,6 +175,73 @@ func LoadLedger() (LedgerConfig, error) {
 	return cfg, errors.Join(errs...)
 }
 
+// WorkerConfig is the configuration of cmd/ledger-worker.
+type WorkerConfig struct {
+	ServiceName     string
+	HTTPAddr        string // /healthz and /readyz only
+	DatabaseURL     string
+	LogLevel        slog.Level
+	ShutdownTimeout time.Duration
+	Currencies      []string
+	MaxAmount       int64
+	ProcessTimeout  time.Duration
+	IdempotencyTTL  time.Duration
+	EventsTopic     string
+	SweepInterval   time.Duration // LEDGER_SWEEP_INTERVAL
+	SweepAfter      time.Duration // LEDGER_SWEEP_AFTER
+	PendingMaxAge   time.Duration // LEDGER_PENDING_MAX_AGE
+	PurgeInterval   time.Duration // IDEMPOTENCY_PURGE_INTERVAL
+}
+
+// LoadWorker reads the ledger-worker environment (TRD §12.2).
+func LoadWorker() (WorkerConfig, error) {
+	var errs []error
+	cfg := WorkerConfig{
+		ServiceName: getEnv("SERVICE_NAME", "ledger-worker"),
+		HTTPAddr:    getEnv("WORKER_HTTP_ADDR", ":8082"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		Currencies:  splitList(getEnv("LEDGER_CURRENCIES", "IDR")),
+		EventsTopic: getEnv("KAFKA_TOPIC_EVENTS", "ledger.events.v1"),
+	}
+	if cfg.DatabaseURL == "" {
+		errs = append(errs, errors.New("DATABASE_URL is required"))
+	}
+	if err := cfg.LogLevel.UnmarshalText([]byte(getEnv("LOG_LEVEL", "info"))); err != nil {
+		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
+	}
+	var err error
+	for _, d := range []struct {
+		dst *time.Duration
+		key string
+		def time.Duration
+	}{
+		{&cfg.ShutdownTimeout, "SHUTDOWN_TIMEOUT", 15 * time.Second},
+		{&cfg.ProcessTimeout, "LEDGER_PROCESS_TIMEOUT", 2 * time.Second},
+		{&cfg.IdempotencyTTL, "IDEMPOTENCY_TTL", 24 * time.Hour},
+		{&cfg.SweepInterval, "LEDGER_SWEEP_INTERVAL", 5 * time.Second},
+		{&cfg.SweepAfter, "LEDGER_SWEEP_AFTER", 5 * time.Second},
+		{&cfg.PendingMaxAge, "LEDGER_PENDING_MAX_AGE", 15 * time.Minute},
+		{&cfg.PurgeInterval, "IDEMPOTENCY_PURGE_INTERVAL", time.Minute},
+	} {
+		if *d.dst, err = getDuration(d.key, d.def); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if cfg.SweepInterval <= 0 || cfg.PurgeInterval <= 0 {
+		errs = append(errs, errors.New("LEDGER_SWEEP_INTERVAL and IDEMPOTENCY_PURGE_INTERVAL must be positive"))
+	}
+	// A sweep must not race the request path's own Tx2.
+	if cfg.SweepAfter < cfg.ProcessTimeout {
+		errs = append(errs, errors.New("LEDGER_SWEEP_AFTER must be at least LEDGER_PROCESS_TIMEOUT"))
+	}
+	if v := getEnv("LEDGER_MAX_AMOUNT", "1000000000000"); v != "" {
+		if cfg.MaxAmount, err = strconv.ParseInt(v, 10, 64); err != nil {
+			errs = append(errs, fmt.Errorf("LEDGER_MAX_AMOUNT: %w", err))
+		}
+	}
+	return cfg, errors.Join(errs...)
+}
+
 // ParseClients parses LEDGER_CLIENTS: "id:sha256hex:op,op;id2:...". It
 // rejects unknown operations, malformed hashes, and duplicate ids or hashes.
 // The error never contains the hash values.

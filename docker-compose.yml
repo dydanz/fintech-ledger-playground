@@ -74,6 +74,30 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  ledger-worker:
+    build:
+      context: .
+      args:
+        CMD: ledger-worker
+    image: ledger-worker:local
+    environment:
+      SERVICE_NAME: ledger-worker
+      WORKER_HTTP_ADDR: ":8082"
+      DATABASE_URL: postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/${POSTGRES_DB:-auth}?sslmode=disable
+      LEDGER_CURRENCIES: ${LEDGER_CURRENCIES:-IDR}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # No published port: /healthz and /readyz are for the container healthcheck.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -86,6 +110,7 @@ services:
       - ./migrations/001_init.up.sql:/docker-entrypoint-initdb.d/001_init.up.sql:ro
       - ./migrations/002_ledger.up.sql:/docker-entrypoint-initdb.d/002_ledger.up.sql:ro
       - ./migrations/003_idempotency_response_bytes.up.sql:/docker-entrypoint-initdb.d/003_idempotency_response_bytes.up.sql:ro
+      - ./migrations/004_idempotency_resource_index.up.sql:/docker-entrypoint-initdb.d/004_idempotency_resource_index.up.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:

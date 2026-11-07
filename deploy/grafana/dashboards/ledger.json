@@ -65,7 +65,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (event, outcome, reason) (count_over_time({service=\"ledger-api\", level=\"error\"} | json | event=~\"ledger\\\\..+\" [5m]))",
+          "expr": "sum by (event, outcome, reason) (count_over_time({service=~\"ledger-api|ledger-worker\", level=\"error\"} | json | event=~\"ledger\\\\..+\" [5m]))",
           "legendFormat": "{{event}} {{outcome}} {{reason}}"
         }
       ],
@@ -216,7 +216,7 @@
     {
       "id": 7,
       "type": "logs",
-      "title": "Recent errors (ledger-api)",
+      "title": "Recent errors (ledger-api, ledger-worker)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -234,7 +234,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=\"ledger-api\", level=\"error\"} | json"
+          "expr": "{service=~\"ledger-api|ledger-worker\", level=\"error\"} | json"
         }
       ],
       "options": {
@@ -264,7 +264,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=\"ledger-api\"} | json | event=~\"dependency\\\\.(connect|call)|app\\\\..+\""
+          "expr": "{service=~\"ledger-api|ledger-worker\"} | json | event=~\"dependency\\\\.(connect|call)|app\\\\..+\""
         }
       ],
       "options": {
@@ -328,6 +328,70 @@
           },
           "expr": "sum by (event, outcome, rule) (count_over_time({service=\"ledger-api\"} | json | event=~\"ledger\\\\.(freeze|unfreeze)\" [5m]))",
           "legendFormat": "{{event}} {{outcome}} {{rule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "PENDING recoveries by reason (sweeper)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.recover\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Idempotency keys purged",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum (sum_over_time({service=\"ledger-worker\"} | json | event=\"ledger.purge\" | outcome=\"success\" | unwrap deleted [5m]))",
+          "legendFormat": "deleted"
         }
       ],
       "fieldConfig": {
