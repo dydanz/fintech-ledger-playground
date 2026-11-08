@@ -1,7 +1,8 @@
 .PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
-up:
+up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
+	./scripts/grafana-reload.sh
 
 down:
 	docker compose down
