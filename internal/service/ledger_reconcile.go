@@ -328,8 +328,13 @@ func (p *reconcilePass) checkTransactions(ctx context.Context, ids []string) err
 	}
 	byStream := groupEvents(events)
 	for _, c := range checks {
-		p.add(transactionJournalMismatches(c)...)
-		if c.Exists {
+		// Archived rows are proven by their export's manifest and read-back
+		// (§7.8), not here: a SETTLED transaction whose month was archived has
+		// no lines left, and a stream with archived events can't be folded.
+		if !c.ArchivedLines {
+			p.add(transactionJournalMismatches(c)...)
+		}
+		if c.Exists && !c.ArchivedEvents {
 			p.add(transactionProjectionMismatches(c, byStream[c.ID])...)
 		}
 	}
@@ -390,7 +395,9 @@ func (p *reconcilePass) checkAccounts(ctx context.Context, ids []string) error {
 	}
 	byStream := groupEvents(events)
 	for _, c := range checks {
-		p.add(accountProjectionMismatches(c, byStream[c.ID])...)
+		if !c.ArchivedEvents {
+			p.add(accountProjectionMismatches(c, byStream[c.ID])...)
+		}
 	}
 	p.rep.Accounts += len(checks)
 	return nil

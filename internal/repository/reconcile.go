@@ -60,6 +60,10 @@ type TransactionCheck struct {
 	Currencies            int64
 	WrongCurrency         int64 // lines in another currency than the transaction
 	WrongLedger           int64 // lines on neither the transaction's ledger nor its counterparty
+	// The archiver (§7.8) has removed the month its lines were posted in, or
+	// a month its events may be in: checks 3 and 4 can't see them in Postgres.
+	ArchivedLines  bool
+	ArchivedEvents bool
 }
 
 // AccountCheck is an account projection and its USER ledgers, currency → id.
@@ -70,6 +74,8 @@ type AccountCheck struct {
 	Status  ledger.AccountStatus
 	Version int64
 	Ledgers map[string]string
+	// ArchivedEvents: some of the account's events may be in an archived month.
+	ArchivedEvents bool
 }
 
 // StoredEvent is an event row with its payload still encoded, so a payload
@@ -244,7 +250,10 @@ func (q reconcileQueries) CheckTransactions(ctx context.Context, ids []string) (
 		       coalesce(t.account_id::text, ''), coalesce(t.ledger_id::text, ''), coalesce(t.type, ''),
 		       coalesce(t.status, ''), coalesce(t.amount, 0), coalesce(t.currency, ''), coalesce(t.version, 0),
 		       coalesce(t.failure_reason, ''), coalesce(t.original_transaction_id::text, ''), coalesce(t.requested_by, ''),
-		       j.lines, j.total, j.currencies, j.wrong_currency, j.wrong_ledger
+		       j.lines, j.total, j.currencies, j.wrong_currency, j.wrong_ledger,
+		       EXISTS (SELECT 1 FROM ledger.archives a WHERE a.table_name = 'journal_entries'
+		                 AND t.settled_at >= a.month AND t.settled_at < a.month + interval '1 month'),
+		       coalesce(t.created_at < (SELECT max(a.month) + interval '1 month' FROM ledger.archives a WHERE a.table_name = 'events'), false)
 		  FROM unnest($1::uuid[]) AS ids(id)
 		  LEFT JOIN ledger.transactions t ON t.id = ids.id
 		 CROSS JOIN LATERAL (
@@ -263,7 +272,7 @@ func (q reconcileQueries) CheckTransactions(ctx context.Context, ids []string) (
 		var c TransactionCheck
 		return c, row.Scan(&c.ID, &c.Exists, &c.AccountID, &c.LedgerID, &c.Type, &c.Status, &c.Amount, &c.Currency,
 			&c.Version, &c.FailureReason, &c.OriginalTransactionID, &c.RequestedBy,
-			&c.Lines, &c.JournalSum, &c.Currencies, &c.WrongCurrency, &c.WrongLedger)
+			&c.Lines, &c.JournalSum, &c.Currencies, &c.WrongCurrency, &c.WrongLedger, &c.ArchivedLines, &c.ArchivedEvents)
 	})
 }
 
@@ -273,7 +282,8 @@ func (q reconcileQueries) CheckAccounts(ctx context.Context, ids []string) ([]Ac
 		       coalesce((SELECT array_agg(l.currency::text ORDER BY l.currency) FROM ledger.ledgers l
 		                  WHERE l.account_id = ids.id AND l.kind = 'USER'), '{}'),
 		       coalesce((SELECT array_agg(l.id::text ORDER BY l.currency) FROM ledger.ledgers l
-		                  WHERE l.account_id = ids.id AND l.kind = 'USER'), '{}')
+		                  WHERE l.account_id = ids.id AND l.kind = 'USER'), '{}'),
+		       coalesce(a.created_at < (SELECT max(x.month) + interval '1 month' FROM ledger.archives x WHERE x.table_name = 'events'), false)
 		  FROM unnest($1::uuid[]) AS ids(id)
 		  LEFT JOIN ledger.accounts a ON a.id = ids.id
 		 ORDER BY ids.id`, ids)
@@ -283,7 +293,7 @@ func (q reconcileQueries) CheckAccounts(ctx context.Context, ids []string) ([]Ac
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (AccountCheck, error) {
 		var c AccountCheck
 		var currencies, ledgerIDs []string
-		if err := row.Scan(&c.ID, &c.Exists, &c.UserID, &c.Status, &c.Version, &currencies, &ledgerIDs); err != nil {
+		if err := row.Scan(&c.ID, &c.Exists, &c.UserID, &c.Status, &c.Version, &currencies, &ledgerIDs, &c.ArchivedEvents); err != nil {
 			return c, err
 		}
 		c.Ledgers = make(map[string]string, len(currencies))

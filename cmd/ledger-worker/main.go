@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"auth-api/internal/archive"
 	"auth-api/internal/config"
 	"auth-api/internal/kafka"
 	"auth-api/internal/logger"
@@ -60,7 +61,7 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 
 	// Per job: one leader-lock connection (the relay also holds a LISTEN one),
 	// plus the work itself.
-	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 14)
+	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 16)
 	if err != nil {
 		return err
 	}
@@ -117,6 +118,24 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 		return err
 	}
 
+	jobs := []worker.Job{}
+	if cfg.Archive.BucketURI == "" {
+		log.InfoContext(ctx, "archiver disabled: ARCHIVE_BUCKET_URI is not set", "event", "app.lifecycle", "outcome", "success")
+	} else {
+		a := cfg.Archive
+		objects, err := archive.NewS3(archive.S3Config{BucketURI: a.BucketURI, Endpoint: a.Endpoint, AccessKey: a.AccessKey,
+			SecretKey: a.SecretKey, Region: a.Region, Secure: a.Secure, RetentionDays: a.RetentionDays, CreateBucket: a.CreateBucket})
+		if err != nil {
+			return err
+		}
+		archiver, err := service.NewArchiver(repository.NewArchiveRepo(db), objects, service.ArchiveConfig{
+			After: a.After, HoldAll: a.HoldAll, Hold: a.Hold, FileRows: 100_000})
+		if err != nil {
+			return err
+		}
+		jobs = append(jobs, worker.Job{Name: "archiver", Interval: 24 * time.Hour, Run: archiver.Run})
+	}
+
 	runner := worker.NewRunner(db,
 		// Run returns only when leadership ends; Interval is the pause before
 		// the next attempt after an unexpected return.
@@ -128,6 +147,7 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 		// Months ahead are plenty; hourly keeps the alert's signal fresh.
 		worker.Job{Name: "partitions", Interval: time.Hour, Run: partitions.Run},
 	)
+	runner.AddJobs(jobs...)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

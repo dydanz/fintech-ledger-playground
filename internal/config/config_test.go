@@ -156,3 +156,32 @@ func TestLoadFraud(t *testing.T) {
 		t.Error("error leaks the token")
 	}
 }
+
+func TestLoadWorkerArchive(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cfg.Archive; a.After != 61320*time.Hour || a.BucketURI != "" || a.HoldAll || len(a.Hold) != 0 ||
+		!a.Secure || a.CreateBucket || a.RetentionDays != 36500 || a.Region != "us-east-1" {
+		t.Fatalf("archive defaults = %+v", a)
+	}
+	t.Setenv("LEDGER_LEGAL_HOLD", "0192F3C4-0000-7000-8000-000000000001, 0192f3c4-0000-7000-8000-000000000002")
+	if cfg, err = config.LoadWorker(); err != nil || len(cfg.Archive.Hold) != 2 || cfg.Archive.Hold[0] != "0192f3c4-0000-7000-8000-000000000001" {
+		t.Fatalf("hold list: %+v %v", cfg.Archive.Hold, err)
+	}
+	t.Setenv("LEDGER_LEGAL_HOLD", "*")
+	if cfg, err = config.LoadWorker(); err != nil || !cfg.Archive.HoldAll {
+		t.Fatalf("hold all: %+v %v", cfg.Archive, err)
+	}
+	for key, val := range map[string]string{"LEDGER_LEGAL_HOLD": "alice", "ARCHIVE_BUCKET_URI": "s3://b",
+		"ARCHIVE_RETENTION_DAYS": "0", "ARCHIVE_S3_SECURE": "maybe", "LEDGER_ARCHIVE_AFTER": "-1h"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, val)
+			if _, err := config.LoadWorker(); err == nil || !strings.Contains(err.Error(), key) && !strings.Contains(err.Error(), "ARCHIVE") {
+				t.Fatalf("%s=%s accepted: %v", key, val, err)
+			}
+		})
+	}
+}

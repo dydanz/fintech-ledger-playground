@@ -18,6 +18,7 @@ type RebuildStore interface {
 	ListUserLedgerIDs(ctx context.Context, after string, limit int) ([]string, error)
 	ListAccountTransactionIDs(ctx context.Context, accountID, after string, limit int) ([]string, error)
 	ListAccountLedgerIDs(ctx context.Context, accountID string) ([]string, error)
+	EventsHorizon(ctx context.Context) (time.Time, error)
 	InTx(ctx context.Context, commit bool, fn func(repository.RebuildTx) error) error
 }
 
@@ -43,6 +44,7 @@ type RebuildReport struct {
 	Checked int           // rows examined
 	Changed int           // rows that differed (written when Apply)
 	Failed  int           // rows that could not be rebuilt
+	Skipped int           // accounts and transactions whose streams start in an archived month
 	Diffs   []RebuildDiff // every differing column
 }
 
@@ -55,8 +57,9 @@ type RebuildReport struct {
 // path takes, so the result is exact while ledger-api keeps serving. The
 // event streams and journal are never touched.
 type Rebuilder struct {
-	store RebuildStore
-	batch int
+	store   RebuildStore
+	batch   int
+	horizon time.Time // streams created before it may have archived events
 }
 
 func NewRebuilder(store RebuildStore, batch int) (*Rebuilder, error) {
@@ -66,7 +69,12 @@ func NewRebuilder(store RebuildStore, batch int) (*Rebuilder, error) {
 	return &Rebuilder{store: store, batch: batch}, nil
 }
 
-var errUnrebuildable = errors.New("source of truth does not fold")
+var (
+	errUnrebuildable = errors.New("source of truth does not fold")
+	// errArchivedStream: the row's stream starts in an archived month, so its
+	// events aren't all in Postgres; the archive's manifest is its record.
+	errArchivedStream = errors.New("stream partly archived")
+)
 
 // Rebuild rebuilds accounts, then transactions, then USER ledgers. A row
 // that fails is logged and skipped; the error returned reports how many.
@@ -90,6 +98,10 @@ func (b *Rebuilder) Rebuild(ctx context.Context, opts RebuildOptions) (RebuildRe
 				return err
 			})
 			rep.Checked++
+			if errors.Is(err, errArchivedStream) {
+				rep.Skipped++
+				continue
+			}
 			if err != nil {
 				rep.Failed++
 				reason := "pg_error"
@@ -117,6 +129,9 @@ func (b *Rebuilder) Rebuild(ctx context.Context, opts RebuildOptions) (RebuildRe
 	}
 
 	accounts, transactions, ledgers, err := b.scope(ctx, opts.AccountID)
+	if err == nil {
+		b.horizon, err = b.store.EventsHorizon(ctx)
+	}
 	if err != nil {
 		log.ErrorContext(ctx, "projection rebuild could not list rows", "event", "ledger.rebuild", "outcome", "failure",
 			"reason", "pg_error", "error", err, "mode", mode)
@@ -127,7 +142,7 @@ func (b *Rebuilder) Rebuild(ctx context.Context, opts RebuildOptions) (RebuildRe
 	run("ledger", ledgers, b.ledger)
 
 	summary := []any{"event", "ledger.rebuild", "mode", mode, "checked", rep.Checked, "changed", rep.Changed,
-		"failed", rep.Failed, "duration_ms", float64(time.Since(start).Microseconds()) / 1000}
+		"failed", rep.Failed, "skipped_archived", rep.Skipped, "duration_ms", float64(time.Since(start).Microseconds()) / 1000}
 	if opts.AccountID != "" {
 		summary = append(summary, "account_id", opts.AccountID)
 	}
@@ -180,6 +195,9 @@ func (b *Rebuilder) account(ctx context.Context, tx repository.RebuildTx, id str
 	if err != nil {
 		return nil, err
 	}
+	if cur.CreatedAt.Before(b.horizon) {
+		return nil, errArchivedStream
+	}
 	stored, err := tx.StreamEvents(ctx, ledger.StreamAccount, id)
 	if err != nil {
 		return nil, err
@@ -202,6 +220,9 @@ func (b *Rebuilder) transaction(ctx context.Context, tx repository.RebuildTx, id
 	cur, err := tx.LockTransaction(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if cur.CreatedAt.Before(b.horizon) {
+		return nil, errArchivedStream
 	}
 	stored, err := tx.StreamEvents(ctx, ledger.StreamTransaction, id)
 	if err != nil {
