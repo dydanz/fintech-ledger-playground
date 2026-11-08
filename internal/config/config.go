@@ -196,6 +196,7 @@ type WorkerConfig struct {
 	OutboxBatch     int           // OUTBOX_BATCH_SIZE
 	OutboxRetention time.Duration // OUTBOX_RETENTION
 	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT: bound on one batch
+	ReconcileEvery  time.Duration // RECONCILE_INTERVAL
 }
 
 // LoadWorker reads the ledger-worker environment (TRD §12.2).
@@ -236,13 +237,14 @@ func LoadWorker() (WorkerConfig, error) {
 		{&cfg.OutboxPoll, "OUTBOX_POLL_INTERVAL", 200 * time.Millisecond},
 		{&cfg.OutboxRetention, "OUTBOX_RETENTION", 72 * time.Hour},
 		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
+		{&cfg.ReconcileEvery, "RECONCILE_INTERVAL", time.Minute},
 	} {
 		if *d.dst, err = getDuration(d.key, d.def); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if cfg.SweepInterval <= 0 || cfg.PurgeInterval <= 0 || cfg.OutboxPoll <= 0 || cfg.OutboxRetention <= 0 || cfg.OutboxPublish <= 0 {
-		errs = append(errs, errors.New("LEDGER_SWEEP_INTERVAL, IDEMPOTENCY_PURGE_INTERVAL, OUTBOX_POLL_INTERVAL and OUTBOX_RETENTION must be positive"))
+	if cfg.SweepInterval <= 0 || cfg.PurgeInterval <= 0 || cfg.OutboxPoll <= 0 || cfg.OutboxRetention <= 0 || cfg.OutboxPublish <= 0 || cfg.ReconcileEvery <= 0 {
+		errs = append(errs, errors.New("LEDGER_SWEEP_INTERVAL, IDEMPOTENCY_PURGE_INTERVAL, OUTBOX_POLL_INTERVAL, OUTBOX_RETENTION, OUTBOX_PUBLISH_TIMEOUT and RECONCILE_INTERVAL must be positive"))
 	}
 	if len(cfg.KafkaBrokers) == 0 {
 		errs = append(errs, errors.New("KAFKA_BROKERS is required"))

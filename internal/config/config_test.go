@@ -98,9 +98,14 @@ func TestLoadWorkerDefaultsAndErrors(t *testing.T) {
 		cfg.SweepAfter != 5*time.Second || cfg.PendingMaxAge != 15*time.Minute || cfg.PurgeInterval != time.Minute ||
 		cfg.ProcessTimeout != 2*time.Second || strings.Join(cfg.Currencies, ",") != "IDR" ||
 		cfg.OutboxPoll != 200*time.Millisecond || cfg.OutboxBatch != 500 || cfg.OutboxRetention != 72*time.Hour ||
-		strings.Join(cfg.KafkaBrokers, ",") != "localhost:9094" {
+		strings.Join(cfg.KafkaBrokers, ",") != "localhost:9094" || cfg.ReconcileEvery != time.Minute {
 		t.Fatalf("defaults = %+v", cfg)
 	}
+	t.Setenv("RECONCILE_INTERVAL", "0s")
+	if _, err := config.LoadWorker(); err == nil || !strings.Contains(err.Error(), "RECONCILE_INTERVAL") {
+		t.Fatalf("zero reconcile interval: %v", err)
+	}
+	t.Setenv("RECONCILE_INTERVAL", "")
 	// The sweeper must not take over a Tx2 the request path may still finish.
 	t.Setenv("LEDGER_SWEEP_AFTER", "1s")
 	if _, err := config.LoadWorker(); err == nil || !strings.Contains(err.Error(), "LEDGER_SWEEP_AFTER") {
