@@ -1,3 +1,4 @@
 .env
 /auth-api
 /load-results
+/chaos-results

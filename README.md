@@ -213,6 +213,19 @@ make load PROFILE=quick  # the same shape in about 2 minutes, across 1,000 accou
 
 `scripts/load/run.sh` inserts the load users straight into Postgres (registering 10,000 through auth-api at bcrypt cost 12 would take most of an hour), runs `scripts/load/ledger-mixed.js` in k6, samples the outbox lag, then reports the transaction outcomes, `FAILED processing_timeout`, server-side write latency from Loki, and a full reconciler sweep. k6 exits non-zero when an NFR threshold fails. Results go to `load-results/<run>/`. Use a throwaway compose project (`COMPOSE_PROJECT_NAME=…`) to keep the load data out of your stack. `make load-credits` is the older credits-only outbox lag check.
 
+**Chaos drills** (TRD §13.5; runbook and recorded results in `spec/Chaos Runbook - Immutable Ledger.md`). They stop and kill containers, so run them only in a throwaway project:
+
+```bash
+COMPOSE_PROJECT_NAME=chaos make load-up
+COMPOSE_PROJECT_NAME=chaos make chaos FAULT=redis      # stop Redis for 60 s
+COMPOSE_PROJECT_NAME=chaos make chaos FAULT=kafka      # stop Kafka for 5 min
+COMPOSE_PROJECT_NAME=chaos make chaos FAULT=postgres   # kill -9 Postgres, restart after 30 s
+COMPOSE_PROJECT_NAME=chaos make chaos FAULT=worker     # 2 ledger-worker replicas, kill -9 the leader
+COMPOSE_PROJECT_NAME=chaos docker compose down -v
+```
+
+`scripts/chaos/run.sh` writes at 50/s with `scripts/load/ledger-chaos.js`, which retries each request with its `Idempotency-Key` until it gets an answer. Around the fault it injects, it samples the outbox. Afterwards it checks that Postgres, every balance and the Kafka topic match what the client was told, and runs a full reconciler sweep. Each check prints PASS or FAIL, and results go to `chaos-results/<run>-<fault>/`. A run during which the host slept is reported as INVALID.
+
 ## Not included (next steps)
 
 - Rate limiting and lockout on `/login`
