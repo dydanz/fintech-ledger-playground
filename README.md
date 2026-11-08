@@ -146,9 +146,13 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 
 ## Database migrations
 
-`migrations/*.up.sql` are mounted into `/docker-entrypoint-initdb.d`, so they run automatically, in order, the **first** time Postgres starts with an empty volume. Run `make reset` to re-initialise. **An existing volume does not pick up a new migration**: after pulling a new one (such as `002_ledger.up.sql`, `003_idempotency_response_bytes.up.sql` or `004_idempotency_resource_index.up.sql`), run `make reset` (this deletes local data).
+[golang-migrate](https://github.com/golang-migrate/migrate) applies `migrations/*.up.sql` in order. `make up` runs it as the one-shot `migrate` service, and every service that uses Postgres waits for it to finish, so pulling a new migration needs only `make up` (or `make migrate`). Your data is kept. `make migrate-version` shows the recorded version (`public.schema_migrations`).
 
-`002_ledger.up.sql` creates the `ledger` schema with monthly partitions for the current month and 3 ahead. Until the ledger-worker partition job exists (P5), extend them by hand when needed: `SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4);` Up/down files follow the `golang-migrate` naming, so you can switch to a migration runner in production.
+- **Volumes created before the runner** (migrations 001–004 ran as Postgres init scripts) are baselined automatically on the first `make up`: `deploy/migrate/baseline.sh` detects which of 001–004 are in place and records that version, then `migrate` applies the rest. It does nothing on an empty database or one that is already baselined.
+- **A new migration** is a `NNN_name.up.sql` / `NNN_name.down.sql` pair with the next number. `make test-integration` applies every up file to a throwaway database (`internal/testutil/pgtest`).
+- `make reset` still drops all volumes; the next `up` migrates the empty database.
+
+`002_ledger.up.sql` creates the `ledger` schema with monthly partitions for the current month and 3 ahead. Until the ledger-worker partition job exists (P5), extend them by hand when needed: `SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4);` In production, run the same `migrate` image (or CLI) against the database before deploying the services.
 
 ## Layout
 

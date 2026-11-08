@@ -27,8 +27,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     labels:
@@ -62,8 +62,8 @@ services:
       # Internal API: never expose beyond the host (TRD §6.1).
       - "127.0.0.1:8081:8081"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     labels:
@@ -90,8 +90,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # No published port: /healthz and /readyz are for the container healthcheck.
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
     labels:
@@ -211,11 +211,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-auth}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Runs once, on first start with an empty data volume.
-      - ./migrations/001_init.up.sql:/docker-entrypoint-initdb.d/001_init.up.sql:ro
-      - ./migrations/002_ledger.up.sql:/docker-entrypoint-initdb.d/002_ledger.up.sql:ro
-      - ./migrations/003_idempotency_response_bytes.up.sql:/docker-entrypoint-initdb.d/003_idempotency_response_bytes.up.sql:ro
-      - ./migrations/004_idempotency_resource_index.up.sql:/docker-entrypoint-initdb.d/004_idempotency_resource_index.up.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -227,6 +222,44 @@ services:
       logging: alloy
     logging: *logging
     restart: unless-stopped
+
+  # Schema migrations (TRD §12.1, §16 Q11): golang-migrate applies
+  # migrations/*.up.sql in order and records the version in
+  # public.schema_migrations. Every service that uses Postgres waits for it.
+  migrate:
+    image: migrate/migrate:v4.20.1
+    # The command is the subcommand: `docker compose run --rm migrate version`.
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/${POSTGRES_DB:-auth}?sslmode=disable"]
+    command: ["up"]
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      migrate-baseline:
+        condition: service_completed_successfully
+    labels:
+      logging: alloy
+    logging: *logging
+    restart: "no"
+
+  # Records the version of a database created by the old init scripts, once
+  # (deploy/migrate/baseline.sh). A no-op on new and already-baselined databases.
+  migrate-baseline:
+    image: postgres:17-alpine
+    entrypoint: ["/baseline.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-auth}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-auth_dev_password}
+      PGDATABASE: ${POSTGRES_DB:-auth}
+    volumes:
+      - ./deploy/migrate/baseline.sh:/baseline.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    restart: "no"
 
   redis:
     image: redis:7.4-alpine

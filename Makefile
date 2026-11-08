@@ -1,4 +1,4 @@
-.PHONY: up down reset logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
+.PHONY: up down reset migrate migrate-version logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
 up:
 	docker compose up -d --build
@@ -6,8 +6,14 @@ up:
 down:
 	docker compose down
 
-reset: ## drop all volumes (re-runs DB init scripts on next `up`)
+reset: ## drop all volumes (the next `up` migrates an empty database)
 	docker compose down -v
+
+migrate: ## apply pending migrations (`up` does this too)
+	docker compose run --rm migrate-baseline && docker compose run --rm migrate
+
+migrate-version: ## the schema version recorded by golang-migrate
+	docker compose run --rm migrate version
 
 logs:
 	docker compose logs -f api

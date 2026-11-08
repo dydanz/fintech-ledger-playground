@@ -828,9 +828,8 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `ledger-worker` | build with `CMD=ledger-worker` | — |
 | `fraud-engine` | build with `CMD=fraud-engine` | No published port; `/healthz` and `/readyz` on `:8083`; depends on redis, kafka-init and ledger-api. Its token is the `fraud-engine` entry in `LEDGER_CLIENTS` (`freeze` only) |
 
-- Postgres gains mounts of `./migrations/002_ledger.up.sql` and `003_idempotency_response_bytes.up.sql` in `docker-entrypoint-initdb.d/`.
+- **Migrations (P5.4, §16 Q11).** The one-shot `migrate` service (`migrate/migrate:v4.20.1`) runs `up` over `./migrations`, and every service that uses Postgres depends on it completing. Postgres no longer mounts init scripts. `migrate-baseline` (the postgres image running `deploy/migrate/baseline.sh`) runs first: on a database created by the old init scripts it records the applied version (1–4) in `schema_migrations`; otherwise it does nothing.
 - **System ledgers for every configured currency.** Migration 002 seeds `topup_clearing` and `settlement` for `IDR` only. `LedgerService.EnsureSystemLedgers` creates any missing ones for `LEDGER_CURRENCIES` at `ledger-api` startup; it's idempotent and safe across replicas.
-- **Caveat.** Init scripts run only on an empty volume, so existing environments need `make reset`. Adopting a migration runner (e.g. `golang-migrate` as a one-shot service) is recommended before a third migration; tracked in §16 Q11.
 - New Makefile targets: `test-integration`, `load` (k6), `kafka-topics`, `logs-ledger`.
 - **Kafka listeners (P3.1).** Containers use `kafka:9092`. The host uses `127.0.0.1:9094` (the `HOST` listener), which is what integration tests reach through `TEST_KAFKA_BROKERS`. The controller listens on `:9093`, internal only. No binary depends on `kafka-init` until the relay in P3.2 does (`ledger-worker`).
 
@@ -975,4 +974,4 @@ Each question has a default the design uses until it is answered.
 | Q8 | Is the retention clock 7 years from entry date, under which jurisdiction, and what is the legal-hold process? | 7 years from `created_at`; legal hold via config |
 | Q9 | Is the account opened automatically at user registration (auth-api calls the ledger), or by the onboarding service? | Explicit `POST /internal/v1/accounts` by the caller |
 | Q10 | Are authorisation holds (reserve now, capture later) needed for any product? | Not in v1 |
-| Q11 | Adopt a migration runner now? | Recommended before migration 003 |
+| Q11 | Adopt a migration runner now? | **Decided (P5):** golang-migrate as a one-shot compose service (§12.1) |
