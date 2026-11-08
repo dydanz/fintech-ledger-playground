@@ -18,7 +18,7 @@ import (
 
 func (e *svcEnv) recovery(sweepAfter, maxAge time.Duration) *service.Recovery {
 	e.t.Helper()
-	r, err := service.NewRecovery(e.svc, repository.NewLedgerRepo(e.pool, outbox.DefaultTopic),
+	r, err := service.NewRecovery(e.svc, repository.NewLedgerRepo(e.pool, outbox.DefaultTopic, nil),
 		service.RecoveryConfig{SweepAfter: sweepAfter, PendingMaxAge: maxAge, SweepBatch: 100, PurgeBatch: 2})
 	if err != nil {
 		e.t.Fatal(err)

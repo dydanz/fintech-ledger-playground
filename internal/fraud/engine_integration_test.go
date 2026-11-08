@@ -64,7 +64,7 @@ func newStack(t *testing.T) *stack {
 	ctx, stop := context.WithCancel(logger.WithContext(context.Background(), logger.New(logs, slog.LevelDebug, "fraud-e2e")))
 	t.Cleanup(stop)
 
-	svc, err := service.NewLedgerService(repository.NewLedgerRepo(pool, topic), service.LedgerConfig{Currencies: []string{"IDR"},
+	svc, err := service.NewLedgerService(repository.NewLedgerRepo(pool, topic, nil), service.LedgerConfig{Currencies: []string{"IDR"},
 		MaxAmount: 1_000_000_000, ProcessTimeout: 5 * time.Second, IdempotencyTTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)

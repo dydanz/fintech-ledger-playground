@@ -19,6 +19,7 @@ import (
 type ledgerQueries struct {
 	db    dbtx
 	topic string
+	wrote *bool // set when an outbox row is written; nil outside InTx
 }
 
 // --- accounts ---
@@ -329,9 +330,8 @@ func (q ledgerQueries) appendEvent(ctx context.Context, e ledger.Event, ledgerID
 		msg.EventID, q.topic, msg.Key, msg.Value, headers); err != nil {
 		return e, fmt.Errorf("insert outbox: %w", err)
 	}
-	// Delivered on COMMIT; repeated notifications in one transaction collapse into one.
-	if _, err := q.db.Exec(ctx, `SELECT pg_notify($1, '')`, outbox.NotifyChannel); err != nil {
-		return e, fmt.Errorf("notify outbox: %w", err)
+	if q.wrote != nil {
+		*q.wrote = true // InTx wakes the relay after COMMIT (outbox.Notifier)
 	}
 	return e, nil
 }

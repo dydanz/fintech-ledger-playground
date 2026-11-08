@@ -19,6 +19,7 @@ import (
 	"auth-api/internal/config"
 	"auth-api/internal/idempotency"
 	"auth-api/internal/logger"
+	"auth-api/internal/outbox"
 	"auth-api/internal/repository"
 	"auth-api/internal/service"
 	"auth-api/internal/session"
@@ -67,7 +68,12 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 		return fmt.Errorf("connect redis: %w", err)
 	}
 
-	ledgerSvc, err := service.NewLedgerService(repository.NewLedgerRepo(db, cfg.EventsTopic), service.LedgerConfig{
+	// Wakes the relay after writes commit, at most once per 10 ms. Never
+	// inside the write transaction: see outbox.Notifier.
+	notifier := outbox.NewNotifier(db, 10*time.Millisecond)
+	go notifier.Run(ctx)
+
+	ledgerSvc, err := service.NewLedgerService(repository.NewLedgerRepo(db, cfg.EventsTopic, notifier), service.LedgerConfig{
 		Currencies:       cfg.Currencies,
 		MaxAmount:        cfg.MaxAmount,
 		ProcessTimeout:   cfg.ProcessTimeout,
