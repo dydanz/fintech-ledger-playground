@@ -46,6 +46,8 @@ wait_states() {
 healthy=
 for i in $(seq 1 30); do curl -fsS -u "$AUTH" "$GRAFANA/api/health" >/dev/null 2>&1 && { healthy=1; break; }; sleep 1; done
 [[ -n "$healthy" ]] || fail "Grafana is not reachable at $GRAFANA (is the stack up?)"
+# Rules added since Grafana started are only loaded by a reload.
+"$(dirname "$0")/grafana-reload.sh" >/dev/null
 ready=
 for i in $(seq 1 60); do curl -fsS "$LOKI/ready" >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done # Loki waits ~15s after start
 [[ -n "$ready" ]] || fail "Loki is not ready at $LOKI"
