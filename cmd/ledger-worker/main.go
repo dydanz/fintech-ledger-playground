@@ -1,6 +1,6 @@
 // Command ledger-worker runs the ledger's background jobs: the outbox relay
 // to Kafka (spec/TRD §7.3), the stuck-transaction sweeper (§7.5), the
-// reconciler (§7.6), and the idempotency-key and outbox purges. Every replica
+// reconciler (§7.6), partition maintenance (§7.7), and the idempotency-key and outbox purges. Every replica
 // runs every job, but only the holder of a job's advisory lock executes it.
 //
 // `ledger-worker rebuild-projections [--apply] [--account <id>]` instead
@@ -112,6 +112,11 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 		return err
 	}
 
+	partitions, err := service.NewPartitions(repository.NewPartitionRepo(db), service.PartitionConfig{MonthsAhead: 3, MinAhead: 2})
+	if err != nil {
+		return err
+	}
+
 	runner := worker.NewRunner(db,
 		// Run returns only when leadership ends; Interval is the pause before
 		// the next attempt after an unexpected return.
@@ -120,6 +125,8 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 		worker.Job{Name: "sweeper", Interval: cfg.SweepInterval, Run: recovery.Sweep},
 		worker.Job{Name: "idempotency_purge", Interval: cfg.PurgeInterval, Run: recovery.PurgeIdempotencyKeys},
 		worker.Job{Name: "reconciler", Interval: cfg.ReconcileEvery, Run: reconciler.Run},
+		// Months ahead are plenty; hourly keeps the alert's signal fresh.
+		worker.Job{Name: "partitions", Interval: time.Hour, Run: partitions.Run},
 	)
 	var wg sync.WaitGroup
 	wg.Add(1)

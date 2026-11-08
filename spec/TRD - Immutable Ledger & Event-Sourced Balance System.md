@@ -687,6 +687,12 @@ Any mismatch emits `ledger.reconcile` with outcome `failure`, which pages (§11.
 
 The worker keeps monthly partitions created at least 3 months ahead for `journal_entries` and `events`, each with its local unique indexes (§5.1). If fewer than 2 future partitions exist, it logs `ledger.partition` with outcome `failure`, which raises an alert. There is no DEFAULT partition, because one would make adding partitions later require a scan.
 
+**Implementation (P5.3).** The ledger-worker job `partitions` (`service.Partitions`, hourly) works by the UTC month.
+- **Creating.** It calls `ledger.ensure_partitions(<current month>, 4)` from migration 002. That function is idempotent and adds each partition's local unique index and TRUNCATE guard.
+- **Counting.** It then counts, per table, the attached partitions whose lower bound is at or after next month, read from `pg_inherits` and the partition bounds.
+- **Logging.** If the smaller count is under 2, it logs `insufficient_future_partitions` with the `table`. If creating failed while enough months remain, it logs `pg_error`. Otherwise it logs a success with `created` and `future_months`.
+- **A pitfall.** A non-partition table squatting on a partition's name makes `ensure_partitions` skip that month, which this check catches.
+
 ### 7.8 Retention and archival (NFR data retention)
 
 For each monthly partition older than `LEDGER_ARCHIVE_AFTER` (default 7 years), the archiver, as `ledger_archiver`:
@@ -827,7 +833,7 @@ P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`: folder `ledger`, gro
   - **Stuck PENDING:** any `ledger.recover` with `processing_timeout`.
   - **P4.2:** "fraud freeze failing" is `fraud.decision` failures > 0 in 5 m (page).
   - **P5.1:** "reconcile failure" is any `ledger.reconcile` failure in 5 m (page). This includes `pg_error`, because a run that can't complete proves nothing.
-  - **Later phases:** the partition rule lands with P5.3.
+  - **P5.3:** "partitions running out" is any `ledger.partition` failure in 2 h (ticket). The job runs hourly.
 - **Verification.** `make check-alerts` (`scripts/check-alerts.sh`) checks four things:
   - the rules are provisioned;
   - every dashboard query runs on Loki;
