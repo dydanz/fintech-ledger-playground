@@ -96,7 +96,7 @@ P0 ──▶ P1 ──┬──▶ P2 ──┬──────────▶
 | Q7 debit-volume thresholds | P4.1 | Yes, configurable. Real values are needed before production, not before merge. |
 | Q8 retention jurisdiction / legal hold | P6.1 | **Confirm before P6.1 starts.** |
 | Q9 account auto-open on register | P1.5 | Yes (explicit `POST /internal/v1/accounts`) |
-| Q11 migration runner | P6.1 (first change that may need migration 003) | **Decide during P5.** Otherwise P6 has to reset volumes. |
+| Q11 migration runner | P5.1 (migration 005) | **Decided in P5:** golang-migrate (P5.4, merged before P5.1). |
 
 ---
 
@@ -208,10 +208,11 @@ P0 ──▶ P1 ──┬──▶ P2 ──┬──────────▶
 | 5.1 | `feat/ledger-reconciler` (`main`) | Reconciler job: checks 1–4, a watermark for incremental runs, and a nightly full sweep. Catalog row `ledger.reconcile`; "reconcile failure" alert. | Random mixed workload → clean; injected projection drift (direct UPDATE on `ledgers`) → `balance_mismatch`; sequence gap → `sequence_gap` |
 | 5.2 | `feat/ledger-rebuild-projections` (`main`) | `ledger-worker rebuild-projections`: dry-run diff by default, `--apply` behind an explicit flag, with logging. | Rebuild reproduces projections exactly (§13.3) |
 | 5.3 | `feat/ledger-partitions` (`main`) | Partition maintenance job keeping the current month + 3 ahead, with local unique indexes. Catalog row `ledger.partition`; "partitions running out" alert. | Injected clock creates future partitions; fewer than 2 ahead → failure event |
+| 5.4 | `feat/migration-runner` (`main`) | Q11: golang-migrate as a one-shot compose service, replacing the init-script mounts; existing volumes are baselined automatically. Lands first, so 5.1's migration 005 applies without `make reset`. | Empty database → 001–004 applied; a volume at 001 → baselined at 1, then 002–004 applied with data kept; a volume at 004 → no change; `down -all` then `up` round trip |
 
 **Acceptance.**
 - [ ] Reconciler checks 1–4 run every `RECONCILE_INTERVAL` and alert on any mismatch.
-- [ ] Q11 (migration runner) is decided and recorded in the TRD.
+- [x] Q11 (migration runner) is decided and recorded in the TRD.
 
 ---
 
