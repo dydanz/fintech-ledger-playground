@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
+.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
 up:
 	docker compose up -d --build
@@ -11,6 +11,11 @@ reset: ## drop all volumes (the next `up` migrates an empty database)
 
 migrate: ## apply pending migrations (`up` does this too)
 	docker compose run --rm migrate-baseline && docker compose run --rm migrate
+
+# Dry run by default; review the ledger.rebuild lines, then ARGS=--apply.
+# Scope to one account with ARGS="--account <id>". Exit 3: a dry run found differences.
+rebuild-projections: ## recompute projections from events + journal (TRD §7.6)
+	docker compose run --rm --no-deps ledger-worker rebuild-projections $(ARGS)
 
 migrate-version: ## the schema version recorded by golang-migrate
 	docker compose run --rm migrate version

@@ -2,10 +2,16 @@
 // to Kafka (spec/TRD §7.3), the stuck-transaction sweeper (§7.5), the
 // reconciler (§7.6), and the idempotency-key and outbox purges. Every replica
 // runs every job, but only the holder of a job's advisory lock executes it.
+//
+// `ledger-worker rebuild-projections [--apply] [--account <id>]` instead
+// recomputes the projections from the events and journal, prints what
+// differs, writes only with --apply, and exits.
 package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -36,6 +42,9 @@ func main() {
 	if err != nil {
 		log.Error("invalid configuration", "event", "app.lifecycle", "outcome", "failure", "reason", "config_invalid", "error", err)
 		os.Exit(1)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "rebuild-projections" {
+		os.Exit(rebuildProjections(cfg, log, os.Args[2:]))
 	}
 
 	if err := run(cfg, log); err != nil {
@@ -138,4 +147,42 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 	stop()
 	wg.Wait() // jobs finish their current run and release their locks
 	return err
+}
+
+// rebuildProjections is the reviewed repair path (spec/TRD §7.6). Exit codes:
+// 0 nothing differed, or --apply wrote every difference; 3 a dry run found
+// differences; 1 a row could not be rebuilt, or the run failed; 2 bad usage.
+func rebuildProjections(cfg config.WorkerConfig, log *slog.Logger, args []string) int {
+	fs := flag.NewFlagSet("rebuild-projections", flag.ContinueOnError)
+	apply := fs.Bool("apply", false, "write the rebuilt rows (default: report the differences only)")
+	account := fs.String("account", "", "rebuild only this account, its ledgers and its transactions")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "rebuild-projections: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx = logger.WithContext(ctx, log)
+	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 2)
+	if err != nil {
+		return 1
+	}
+	defer db.Close()
+	rb, err := service.NewRebuilder(repository.NewRebuildRepo(db, cfg.ProcessTimeout), 1000)
+	if err != nil {
+		return 1
+	}
+	rep, err := rb.Rebuild(ctx, service.RebuildOptions{Apply: *apply, AccountID: *account})
+	switch {
+	case err != nil:
+		return 1
+	case !*apply && rep.Changed > 0:
+		fmt.Fprintf(os.Stderr, "rebuild-projections: %d row(s) differ; review the ledger.rebuild lines, then rerun with --apply\n", rep.Changed)
+		return 3
+	default:
+		return 0
+	}
 }
