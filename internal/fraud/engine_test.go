@@ -260,7 +260,7 @@ func TestHTTPFreezer(t *testing.T) {
 	}
 	if got.URL.Path != "/internal/v1/accounts/acct-1/freeze" || got.Header.Get("Authorization") != "Bearer tok-123" ||
 		got.Header.Get("traceparent") != "00-"+trace+"-00f067aa0ba902b7-01" || !idempotency.ValidKey(got.Header.Get("Idempotency-Key")) ||
-		!strings.Contains(body, `"rule":"topup_velocity"`) || !strings.Contains(body, `"reason":"topup_velocity: 4 top-ups in 3m0s"`) {
+		!strings.Contains(body, `"rule":"topup_velocity"`) || !strings.Contains(body, `"reason":"topup_velocity: window from `+t0.UTC().Format("2006-01-02T15:04:05.000Z")+`"`) {
 		t.Fatalf("request %s %v body %s", got.URL, got.Header, body)
 	}
 	for code, rejected := range map[int]bool{503: false, 500: false, 409: false, 429: false, 401: true, 403: true, 404: true, 400: true} {
@@ -272,5 +272,46 @@ func TestHTTPFreezer(t *testing.T) {
 	}
 	if len(fraud.Reason(fraud.Decision{Rule: fraud.RuleDebitVolume, Count: 999, Sum: 999_999_999_999, Currency: "IDR"})) > 64 {
 		t.Error("debit reason longer than 64 characters")
+	}
+}
+
+// Every decision for one window must send the same key and body: ledger-api
+// refuses a reused key with a different request (idempotency_key_reused).
+// As events keep landing in a window, its count, sum and end grow.
+func TestFreezeRequestIsFixedPerWindow(t *testing.T) {
+	type req struct{ key, body string }
+	capture := func(d fraud.Decision) req {
+		t.Helper()
+		var got req
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var b bytes.Buffer
+			b.ReadFrom(r.Body)
+			got = req{r.Header.Get("Idempotency-Key"), b.String()}
+		}))
+		defer srv.Close()
+		if err := fraud.NewHTTPFreezer(srv.URL, "tok", time.Second).Freeze(context.Background(), d, trace, "00f067aa0ba902b7"); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	for _, rule := range []string{fraud.RuleTopupVelocity, fraud.RuleDebitVolume} {
+		first := capture(fraud.Decision{Rule: rule, AccountID: "acct-1", Currency: "IDR", WindowStart: t0, WindowEnd: t0.Add(time.Minute), Count: 4, Sum: 400})
+		later := capture(fraud.Decision{Rule: rule, AccountID: "acct-1", Currency: "IDR", WindowStart: t0, WindowEnd: t0.Add(4 * time.Minute), Count: 9, Sum: 900})
+		if first != later {
+			t.Errorf("%s: the same window sent different requests:\n %+v\n %+v", rule, first, later)
+		}
+		next := capture(fraud.Decision{Rule: rule, AccountID: "acct-1", Currency: "IDR", WindowStart: t0.Add(time.Second), WindowEnd: t0.Add(4 * time.Minute), Count: 4})
+		if next.key == first.key {
+			t.Errorf("%s: a new window reused the key %s", rule, first.key)
+		}
+		if n := len(fraud.Reason(fraud.Decision{Rule: rule, Currency: "IDR", WindowStart: t0})); n > 64 {
+			t.Errorf("%s: reason is %d characters, max 64", rule, n)
+		}
+	}
+	// debit_volume windows are per currency: same start, other currency, other key.
+	idr := fraud.IdempotencyKey(fraud.Decision{Rule: fraud.RuleDebitVolume, AccountID: "acct-1", Currency: "IDR", WindowStart: t0})
+	usd := fraud.IdempotencyKey(fraud.Decision{Rule: fraud.RuleDebitVolume, AccountID: "acct-1", Currency: "USD", WindowStart: t0})
+	if idr == usd || !idempotency.ValidKey(idr) {
+		t.Errorf("debit_volume keys: IDR %q, USD %q", idr, usd)
 	}
 }
