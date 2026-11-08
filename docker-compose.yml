@@ -88,6 +88,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/${POSTGRES_DB:-auth}?sslmode=disable
       LEDGER_CURRENCIES: ${LEDGER_CURRENCIES:-IDR}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      RECONCILE_INTERVAL: ${RECONCILE_INTERVAL:-1m}
       # Archiver (TRD §7.8) into the local write-once store below. The bucket
       # is created with Object Lock in compliance mode; 1 day of retention
       # keeps local drills disposable (production: 36500, a pre-made bucket).
@@ -219,6 +220,20 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    # Postgres's stock memory and WAL settings by default. `make load-up` raises
+    # them to production-like values: with the stock 128MB / 1GB, a 30-minute
+    # 500 TPS run checkpoints every minute and backends write their own dirty
+    # pages (spec/Load Test Results - Immutable Ledger.md).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-128MB}
+      - -c
+      - max_wal_size=${PG_MAX_WAL_SIZE:-1GB}
+      - -c
+      - checkpoint_timeout=${PG_CHECKPOINT_TIMEOUT:-5min}
+      - -c
+      - wal_compression=${PG_WAL_COMPRESSION:-off}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-auth}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auth_dev_password}
