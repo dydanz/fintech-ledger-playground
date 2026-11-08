@@ -599,9 +599,11 @@ func pages(ctx context.Context, list func(after string) ([]string, error), fn fu
 	}
 }
 
-// collect gathers every page into a sorted, de-duplicated slice, plus extra.
+// collect gathers every page into a sorted, de-duplicated slice, plus extra
+// (which may be nil).
 func collect(ctx context.Context, list func(after string) ([]string, error), extra map[string]struct{}) ([]string, error) {
-	set := maps.Clone(extra)
+	set := make(map[string]struct{}, len(extra))
+	maps.Copy(set, extra)
 	if err := pages(ctx, list, func(_ context.Context, ids []string) error {
 		for _, id := range ids {
 			set[id] = struct{}{}

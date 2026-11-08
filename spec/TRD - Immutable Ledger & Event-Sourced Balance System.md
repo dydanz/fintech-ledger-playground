@@ -670,6 +670,17 @@ Any mismatch emits `ledger.reconcile` with outcome `failure`, which pages (§11.
 
   The state lives in the leader's memory, so after a failover the new leader begins with a full sweep.
 - **Carried mismatches.** Whatever a run found broken is checked again on every later run until it's clean, so the alert keeps firing until the data is repaired. If a direct write changes a row without touching `updated_at`, the incremental runs don't see it; the next full sweep does.
+- **Repair: `ledger-worker rebuild-projections` (P5.2).** This is the reviewed repair path. It recomputes each projection row from the source of truth: accounts and transactions from the fold of their streams, and USER ledgers from the latest checkpoint plus the journal.
+  - **What it rebuilds:**
+    - accounts: `user_id`, `status`, `version`;
+    - transactions: everything the stream determines, including `counterparty_ledger_id` (resolved from the code) and `settled_at` (the `TransactionSettled` event's time, which is Tx2's `now()`);
+    - ledgers: `balance`, `last_sequence`.
+
+    `reference` and `metadata` are caller data and are left alone.
+  - **Dry run by default.** It logs one `ledger.rebuild` line per differing column and rolls back. It writes only with `--apply`, and `--account <id>` limits it to one account.
+  - **Concurrency.** Each row is rebuilt in its own transaction under the lock the write path takes on it (the account's advisory lock plus `FOR UPDATE`, or the transaction or ledger row `FOR UPDATE`). That makes it exact while ledger-api is serving.
+  - **What it can't fix.** It never touches events or the journal. A sequence gap or an unbalanced journal can't be "rebuilt" away; it needs a VOID or a migration reviewed by hand. A stream that doesn't fold fails that row with `invalid_stream`.
+  - **Exit codes:** 0 nothing differed (or `--apply` wrote everything), 3 a dry run found differences, 1 a row failed.
 - **Check 4** covers transactions (status, version, type, amount, currency, account, ledger, failure reason, original, requested_by) and accounts (status, version, user, and the set of USER ledgers), each folded with `ledger.FoldTransaction` / `FoldAccount`. A payload that doesn't decode, or a stream that doesn't fold, is itself `projection_drift`.
 
 ### 7.7 Partition maintenance
