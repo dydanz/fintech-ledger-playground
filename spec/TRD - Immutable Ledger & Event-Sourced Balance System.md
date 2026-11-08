@@ -608,14 +608,15 @@ Implemented in P2.3:
   - **Duplicates.** ZSET members are `<transaction_id>:<amount>`, so a replayed event counts once.
   - **Decision.** It carries the start of the offending window (the earliest event in it). That makes the freeze idempotency key stable across replays.
 - **Freezing.** When a rule fires, the engine calls `POST /internal/v1/accounts/{id}/freeze`.
-  - Client `fraud-engine`, with `Idempotency-Key: fraud:<rule>:<account_id>:<window_start>`.
+  - Client `fraud-engine`, with `Idempotency-Key: fraud:<rule>:<account_id>:<window_start>` (plus `:<currency>` for `debit_volume`).
   - The trace continues from the `traceparent` header of the triggering event: same `trace_id`, new span.
   - The call is retried with backoff for up to `FRAUD_FREEZE_RETRY` (default 30s). After that the engine emits `fraud.decision` with outcome `failure` and **does not commit the offset**, so the event is re-evaluated.
 - **Latency target.** p99 under 2s from the triggering commit to the freeze commit: relay wake + consume + one API call. Debits after the freeze commit are blocked strictly (§7.1). Debits that settle inside that window are an accepted risk of asynchronous detection and appear in the `AccountFrozen` audit context.
 - **Implemented in P4.2** (`cmd/fraud-engine`, `fraud.Engine`, `fraud.HTTPFreezer`):
   - **Batches.** A polled batch is processed in order and committed only when every event in it is handled.
   - **Dedupe.** `fraud:seen:<event_id>` is checked first and set only after an event is fully handled. A crash between the freeze and the mark replays an idempotent freeze rather than losing one.
-  - **Idempotency key.** It is `fraud:<rule>:<account_id>:<window_start_ms>`, with the rule's `_` written as `-`, because `Idempotency-Key` allows only `[A-Za-z0-9._:-]`.
+  - **Idempotency key.** It is `fraud:<rule>:<account_id>:<window_start_ms>`, plus `:<currency>` for `debit_volume` (its windows are per currency). The rule's `_` is written as `-`, because `Idempotency-Key` allows only `[A-Za-z0-9._:-]`.
+  - **Request body.** The body is fixed per key. Its `reason` is built only from what the key encodes (`topup_velocity: window from <window_start>`, or `debit_volume <currency>: window from <window_start>`). As more events land in a window, its count and end grow, and every later decision for that window sends the identical request, which ledger-api replays. (Before this fix the count was in the body, so under steady top-ups each later call was refused as `idempotency_key_reused`, logged as `freeze_rejected`, and paged. The count and sum are in the `fraud.decision` log line.)
   - **Tracing.** The engine logs each event with the event's `trace_id` and a new `span_id`, and sends the same pair as `traceparent`. `AccountFrozen` therefore carries the triggering credit's `trace_id`.
   - **Failures.**
     - *Transient* (network, 5xx, 409, 429): retried with backoff. Each `FRAUD_FREEZE_RETRY` that passes logs `fraud.decision` `failure` `freeze_call_failed`, and the event is never skipped.
