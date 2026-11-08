@@ -36,19 +36,30 @@ func NewHTTPFreezer(baseURL, token string, timeout time.Duration) *HTTPFreezer {
 	return &HTTPFreezer{baseURL: strings.TrimRight(baseURL, "/"), token: token, http: &http.Client{Timeout: timeout}}
 }
 
-// IdempotencyKey is fraud:<rule>:<account_id>:<window_start_ms>, with the
+// IdempotencyKey is fraud:<rule>:<account_id>:<window_start_ms>, plus
+// :<currency> for debit_volume (its windows are per currency), with the
 // rule's "_" as "-" (Idempotency-Key allows [A-Za-z0-9._:-]). A replayed
 // decision reuses the key, so the freeze is replayed, not repeated.
 func IdempotencyKey(d Decision) string {
-	return "fraud:" + strings.ReplaceAll(d.Rule, "_", "-") + ":" + d.AccountID + ":" + strconv.FormatInt(d.WindowStart.UnixMilli(), 10)
+	key := "fraud:" + strings.ReplaceAll(d.Rule, "_", "-") + ":" + d.AccountID + ":" + strconv.FormatInt(d.WindowStart.UnixMilli(), 10)
+	if d.Rule == RuleDebitVolume {
+		key += ":" + d.Currency
+	}
+	return key
 }
 
 // Reason is the freeze reason stored in AccountFrozen (at most 64 characters).
+// It is built only from what IdempotencyKey encodes, so every decision for
+// one window sends the same request body. As more events land in a window,
+// its count and end grow; were they in the body, each later call would reuse
+// the key with a different request and be refused as idempotency_key_reused.
+// The count and sum are in the fraud.decision log line instead.
 func Reason(d Decision) string {
+	from := d.WindowStart.UTC().Format("2006-01-02T15:04:05.000Z")
 	if d.Rule == RuleDebitVolume {
-		return fmt.Sprintf("debit_volume: %d debits, %d %s", d.Count, d.Sum, d.Currency)
+		return "debit_volume " + d.Currency + ": window from " + from
 	}
-	return fmt.Sprintf("topup_velocity: %d top-ups in %s", d.Count, d.WindowEnd.Sub(d.WindowStart).Round(time.Second))
+	return "topup_velocity: window from " + from
 }
 
 func (f *HTTPFreezer) Freeze(ctx context.Context, d Decision, traceID, spanID string) error {
