@@ -48,9 +48,12 @@ test:
 # Needs the compose Postgres (`docker compose up -d postgres`). Each test gets
 # its own throwaway database with all migrations applied (internal/testutil/pgtest).
 TEST_KAFKA_BROKERS ?= 127.0.0.1:9094
+TEST_S3_ENDPOINT ?= 127.0.0.1:7070
+TEST_S3_ACCESS_KEY ?= archive-dev
+TEST_S3_SECRET_KEY ?= archive_dev_secret
 TEST_DATABASE_URL ?= postgres://auth:auth_dev_password@localhost:5432/auth?sslmode=disable
 test-integration:
-	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' TEST_KAFKA_BROKERS='$(TEST_KAFKA_BROKERS)' go test -race -count=1 -tags integration ./...
+	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' TEST_KAFKA_BROKERS='$(TEST_KAFKA_BROKERS)' TEST_S3_ENDPOINT='$(TEST_S3_ENDPOINT)' TEST_S3_ACCESS_KEY='$(TEST_S3_ACCESS_KEY)' TEST_S3_SECRET_KEY='$(TEST_S3_SECRET_KEY)' go test -race -count=1 -tags integration ./...
 
 vet:
 	go vet ./...

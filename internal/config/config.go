@@ -197,6 +197,23 @@ type WorkerConfig struct {
 	OutboxRetention time.Duration // OUTBOX_RETENTION
 	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT: bound on one batch
 	ReconcileEvery  time.Duration // RECONCILE_INTERVAL
+	Archive         ArchiveConfig
+}
+
+// ArchiveConfig is the archiver's part of the ledger-worker config (TRD §7.8).
+// The archiver is off while BucketURI is empty.
+type ArchiveConfig struct {
+	After         time.Duration // LEDGER_ARCHIVE_AFTER
+	BucketURI     string        // ARCHIVE_BUCKET_URI, s3://bucket[/prefix]
+	HoldAll       bool          // LEDGER_LEGAL_HOLD=*
+	Hold          []string      // LEDGER_LEGAL_HOLD account ids
+	Endpoint      string        // ARCHIVE_S3_ENDPOINT, host:port
+	AccessKey     string        // ARCHIVE_S3_ACCESS_KEY
+	SecretKey     string        // ARCHIVE_S3_SECRET_KEY
+	Region        string        // ARCHIVE_S3_REGION
+	Secure        bool          // ARCHIVE_S3_SECURE (https)
+	RetentionDays uint          // ARCHIVE_RETENTION_DAYS, used only when the worker creates the bucket
+	CreateBucket  bool          // ARCHIVE_CREATE_BUCKET (local stacks)
 }
 
 // LoadWorker reads the ledger-worker environment (TRD §12.2).
@@ -238,6 +255,7 @@ func LoadWorker() (WorkerConfig, error) {
 		{&cfg.OutboxRetention, "OUTBOX_RETENTION", 72 * time.Hour},
 		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
 		{&cfg.ReconcileEvery, "RECONCILE_INTERVAL", time.Minute},
+		{&cfg.Archive.After, "LEDGER_ARCHIVE_AFTER", 61320 * time.Hour}, // 7 years
 	} {
 		if *d.dst, err = getDuration(d.key, d.def); err != nil {
 			errs = append(errs, err)
@@ -248,6 +266,11 @@ func LoadWorker() (WorkerConfig, error) {
 	}
 	if len(cfg.KafkaBrokers) == 0 {
 		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
+	}
+	if a, err := loadArchive(cfg.Archive.After); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.Archive = a
 	}
 	// A sweep must not race the request path's own Tx2.
 	if cfg.SweepAfter < cfg.ProcessTimeout {
@@ -439,3 +462,48 @@ func getDuration(key string, def time.Duration) (time.Duration, error) {
 	}
 	return d, nil
 }
+
+func loadArchive(after time.Duration) (ArchiveConfig, error) {
+	a := ArchiveConfig{After: after, BucketURI: os.Getenv("ARCHIVE_BUCKET_URI"), Endpoint: os.Getenv("ARCHIVE_S3_ENDPOINT"),
+		AccessKey: os.Getenv("ARCHIVE_S3_ACCESS_KEY"), SecretKey: os.Getenv("ARCHIVE_S3_SECRET_KEY"),
+		Region: getEnv("ARCHIVE_S3_REGION", "us-east-1")}
+	var errs []error
+	if after <= 0 {
+		errs = append(errs, errors.New("LEDGER_ARCHIVE_AFTER must be positive"))
+	}
+	switch hold := strings.TrimSpace(os.Getenv("LEDGER_LEGAL_HOLD")); hold {
+	case "":
+	case "*":
+		a.HoldAll = true
+	default:
+		for _, id := range splitList(hold) {
+			if !uuidPattern.MatchString(id) {
+				errs = append(errs, fmt.Errorf("LEDGER_LEGAL_HOLD: %q is not an account id (or use *)", id))
+				continue
+			}
+			a.Hold = append(a.Hold, strings.ToLower(id))
+		}
+	}
+	for _, b := range []struct {
+		dst *bool
+		key string
+		def bool
+	}{{&a.Secure, "ARCHIVE_S3_SECURE", true}, {&a.CreateBucket, "ARCHIVE_CREATE_BUCKET", false}} {
+		v, err := strconv.ParseBool(getEnv(b.key, strconv.FormatBool(b.def)))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", b.key, err))
+		}
+		*b.dst = v
+	}
+	days, err := getInt("ARCHIVE_RETENTION_DAYS", 36500)
+	if err != nil || days < 1 {
+		errs = append(errs, errors.New("ARCHIVE_RETENTION_DAYS must be a positive number of days"))
+	}
+	a.RetentionDays = uint(max(days, 0))
+	if a.BucketURI != "" && (a.Endpoint == "" || a.AccessKey == "" || a.SecretKey == "") {
+		errs = append(errs, errors.New("ARCHIVE_BUCKET_URI needs ARCHIVE_S3_ENDPOINT, ARCHIVE_S3_ACCESS_KEY and ARCHIVE_S3_SECRET_KEY"))
+	}
+	return a, errors.Join(errs...)
+}
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)

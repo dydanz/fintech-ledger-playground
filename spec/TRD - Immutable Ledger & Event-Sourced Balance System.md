@@ -706,6 +706,26 @@ For each monthly partition older than `LEDGER_ARCHIVE_AFTER` (default 7 years), 
 
 After archival, the fold is `checkpoint + later lines`. Reconciler check 1 already uses that form.
 
+**Implementation (P6.1).** The archiver is the ledger-worker job `archiver` (`service.Archiver`, daily; Postgres access in `repository.ArchiveRepo`; storage in `internal/archive`). §16 Q8 was answered with these defaults: 7 years from `created_at`, legal hold from config.
+- **Eligibility.** A monthly partition of `journal_entries` or `events` is eligible once its range ended at least `LEDGER_ARCHIVE_AFTER` ago. Months go oldest first, journal before events. If any step fails, the run stops, so later months wait.
+- **Before anything.** The bucket must have Object Lock enabled in **compliance** mode with a default retention (`archive.S3.CheckWORM`); otherwise the run logs `bucket_not_worm` and archives nothing. With `ARCHIVE_CREATE_BUCKET=true` (local stacks only), a missing bucket is created that way, with `ARCHIVE_RETENTION_DAYS` of retention. In production, use a pre-made bucket with indefinite (e.g. 36500-day) retention.
+- **Legal hold.** `LEDGER_LEGAL_HOLD` is a comma-separated list of account ids, or `*`. A month with a held account's journal lines (via its USER ledgers) or events is skipped, and logged as `denied` / `legal_hold` with `held_accounts`. `*` archives nothing.
+- **The steps.** Each step is logged as `ledger.archive` with its `step`.
+  1. `checkpoint`: for every ledger with sequenced lines in the journal partition, record its balance at the last sequence inside it (idempotent). SYSTEM ledgers get no checkpoint; nothing reads their journal sum, and every currency's journal still sums to 0 because a transaction's two lines share a partition.
+  2. `export`: write Parquet files (zstd, at most 100,000 rows each) to `<bucket>/ledger/<table>/<yyyy-mm>/part-NNNN.parquet`, then `manifest.json` last. The manifest holds the row count, min and max id, and the checkpoints, plus key, URI, rows, bytes, SHA-256 and id range for each file.
+  3. `verify`: read the manifest and every file back. Check each SHA-256, decode each file and match its row count and id range, and match the total against the manifest and against `count(*)` of the partition. Then record the month in `ledger.archives` as `verified` (migration 006).
+  4. `detach`: run `DETACH PARTITION … CONCURRENTLY`, or `FINALIZE` an interrupted detach.
+  5. `drop`: drop the table and mark the month `dropped`, in one transaction.
+- **Resuming.** A month left `verified` (for example, the worker died before the detach) resumes at the detach on the next run, without exporting again.
+- **The reconciler and rebuild.** Archived rows are proven by their manifest and read-back, not re-checked.
+  - **Check 3:** skipped for a transaction whose `settled_at` falls in an archived journal month.
+  - **Check 4:** skipped for transactions and accounts created before the end of the latest archived events month, because their streams may have lost early events.
+  - **`rebuild-projections`:** skips those rows and reports them as `skipped_archived`.
+  - **Ledgers:** checks 1 and 2 and the rebuild start from the latest checkpoint.
+- **Departures from the design above.**
+  - **No dedicated role.** The archiver connects with the worker's own role, not a separate `ledger_archiver`. Detaching and dropping need ownership of the partitioned tables, and locally one role owns everything. In production, run the worker's archiver with a role that owns `journal_entries` and `events`, and keep ledger-api's role DML-only.
+  - **Local store.** The compose stand-in for S3 is the Versity S3 gateway (`versity/versitygw`, posix backend with a versioning directory), because MinIO no longer publishes container images. It enforces compliance-mode retention: a locked object version can't be deleted, even with the governance bypass.
+
 ---
 
 ## 8. Traceability (FR-05)
@@ -800,7 +820,7 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `app.leader` | C5 | success=info, failure=warn | `pg_error`, `connection_lost` | `worker.Runner` |
 | `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift`; run level: `mismatches_found`, `pg_error` | reconciler (one event per mismatch, with `check`, `field`, `expected`, `actual`; at most 100 per run, then a summary) |
 | `ledger.partition` | C5 | success=info, failure=error | `insufficient_future_partitions`, `pg_error` | partitions job |
-| `ledger.archive` | C2 | success=info, failure=error | `export_failed`, `verify_failed`, `detach_failed`, `legal_hold` | archiver |
+| `ledger.archive` | C2 | success=info, denied=warn (`legal_hold`), failure=error | `legal_hold`; `bucket_not_worm`, `bucket_unavailable`, `export_failed`, `verify_failed`, `detach_failed`, `pg_error` | archiver (one event per step, with `step`) |
 | `outbox.publish` | C4 | failure=warn (retrying) / error (batch abandoned) | `kafka_unavailable`, `kafka_rejected`, `pg_error` | relay |
 | `outbox.lag` | C4 | info; warn when `lag_ms` > 5000 | — | relay, every 30 s (`pending`, `lag_ms`) |
 | `fraud.decision` | C1 | success=warn (freeze applied), failure=error | `freeze_call_failed` | fraud engine (includes `rule`, `account_id`) |
@@ -835,6 +855,7 @@ P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`: folder `ledger`, gro
   - **P4.2:** "fraud freeze failing" is `fraud.decision` failures > 0 in 5 m (page).
   - **P5.1:** "reconcile failure" is any `ledger.reconcile` failure in 5 m (page). This includes `pg_error`, because a run that can't complete proves nothing.
   - **P5.3:** "partitions running out" is any `ledger.partition` failure in 2 h (ticket). The job runs hourly.
+  - **P6.1:** "archiver failing" is any `ledger.archive` failure in 25 h (ticket). The job runs daily. A legal-hold skip is `denied`, so it doesn't fire.
 - **Verification.** `make check-alerts` (`scripts/check-alerts.sh`) checks four things:
   - the rules are provisioned;
   - every dashboard query runs on Loki;
@@ -890,7 +911,9 @@ Loki labels stay `level` and `service` only. Each new container sets `SERVICE_NA
 | `IDEMPOTENCY_PURGE_INTERVAL` / `WORKER_HTTP_ADDR` | `1m` / `:8082` | worker |
 | `OUTBOX_PUBLISH_TIMEOUT` | `10s` | worker |
 | `RECONCILE_INTERVAL` | `1m` | worker |
-| `LEDGER_ARCHIVE_AFTER` / `ARCHIVE_BUCKET_URI` / `LEDGER_LEGAL_HOLD` | `61320h` (7 years) / — / empty | worker |
+| `LEDGER_ARCHIVE_AFTER` / `ARCHIVE_BUCKET_URI` / `LEDGER_LEGAL_HOLD` | `61320h` (7 years) / — (archiver off) / empty (account ids, or `*`) | worker |
+| `ARCHIVE_S3_ENDPOINT` / `ARCHIVE_S3_ACCESS_KEY` / `ARCHIVE_S3_SECRET_KEY` / `ARCHIVE_S3_REGION` / `ARCHIVE_S3_SECURE` | — / — / — / `us-east-1` / `true` (compose: `archive-store:7070`, dev keys, `false`) | worker |
+| `ARCHIVE_CREATE_BUCKET` / `ARCHIVE_RETENTION_DAYS` | `false` / `36500` (compose: `true` / `1`) | worker |
 | `LEDGER_API_URL` / `FRAUD_CLIENT_TOKEN` | `http://ledger-api:8081` / — | fraud |
 | `FRAUD_TOPUP_MAX` / `FRAUD_TOPUP_WINDOW` | `3` / `5m` | fraud |
 | `FRAUD_DEBIT_WINDOW` / `FRAUD_DEBIT_MAX_COUNT` / `FRAUD_DEBIT_LIMITS` | `1h` / `30` / `IDR:50000000` | fraud |
@@ -1009,7 +1032,7 @@ Each question has a default the design uses until it is answered.
 | Q5 | Which currencies, and is each currency's balance independent (no FX)? | `IDR` only; independent |
 | Q6 | Who can unfreeze, and does unfreezing need dual control? | `ops` client only; single control |
 | Q7 | What are the "abnormal deduction volume" thresholds per segment? | Static per-currency limits from config |
-| Q8 | Is the retention clock 7 years from entry date, under which jurisdiction, and what is the legal-hold process? | 7 years from `created_at`; legal hold via config |
+| Q8 | Is the retention clock 7 years from entry date, under which jurisdiction, and what is the legal-hold process? | **Decided (P6): the defaults.** 7 years from `created_at`; legal hold via `LEDGER_LEGAL_HOLD`. Both are configurable (§7.8) |
 | Q9 | Is the account opened automatically at user registration (auth-api calls the ledger), or by the onboarding service? | Explicit `POST /internal/v1/accounts` by the caller |
 | Q10 | Are authorisation holds (reserve now, capture later) needed for any product? | Not in v1 |
 | Q11 | Adopt a migration runner now? | **Decided (P5):** golang-migrate as a one-shot compose service (§12.1) |

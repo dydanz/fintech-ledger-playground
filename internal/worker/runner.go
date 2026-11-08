@@ -36,6 +36,9 @@ func NewRunner(db *pgxpool.Pool, jobs ...Job) *Runner {
 	return &Runner{db: db, jobs: jobs, AcquireEvery: 5 * time.Second, LeaseCheck: time.Second}
 }
 
+// AddJobs adds jobs before Run.
+func (r *Runner) AddJobs(jobs ...Job) { r.jobs = append(r.jobs, jobs...) }
+
 // Run blocks until ctx ends, running every job on this replica while it
 // leads that job.
 func (r *Runner) Run(ctx context.Context) {

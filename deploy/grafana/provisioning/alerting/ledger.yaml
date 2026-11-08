@@ -197,3 +197,34 @@ groups:
             insufficient_future_partitions names the table; pg_error carries the error. Create them by hand with
             SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4); a table squatting on a
             partition's name (ledger.<table>_yYYYYmMM that isn't a partition) makes ensure_partitions skip that month.
+
+      - uid: ledger-archive-failing
+        title: Ledger archiver failing
+        condition: B
+        data:
+          - refId: A
+            # The archiver runs daily; 25 h spans at least one run.
+            relativeTimeRange: {from: 90000, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="ledger-worker"} | json | event="ledger.archive" | outcome="failure" [25h]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: ticket, service: ledger-worker}
+        annotations:
+          summary: 'The archiver failed a step; the partition was kept and later months wait.'
+          description: >-
+            Nothing is lost: a partition is dropped only after its export is verified in a write-once bucket.
+            step and reason say where it stopped: bucket_not_worm (the bucket isn't in Object Lock compliance mode),
+            export_failed, verify_failed, detach_failed (detach or drop), pg_error. The next daily run resumes.

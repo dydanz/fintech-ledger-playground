@@ -68,6 +68,21 @@ func (r *RebuildRepo) ListAccountTransactionIDs(ctx context.Context, accountID, 
 		WHERE account_id = $3 AND id > $1 ORDER BY id LIMIT $2`, afterID(after), limit, accountID)
 }
 
+// EventsHorizon is the end of the latest archived events month (§7.8): a
+// stream that started before it may have lost its first events. Zero when
+// nothing is archived.
+func (r *RebuildRepo) EventsHorizon(ctx context.Context) (time.Time, error) {
+	var t *time.Time
+	if err := r.db.QueryRow(ctx, `SELECT max(month) + interval '1 month' FROM ledger.archives
+		WHERE table_name = 'events'`).Scan(&t); err != nil {
+		return time.Time{}, fmt.Errorf("events horizon: %w", err)
+	}
+	if t == nil {
+		return time.Time{}, nil
+	}
+	return *t, nil
+}
+
 // ListAccountLedgerIDs returns one account's USER ledgers.
 func (r *RebuildRepo) ListAccountLedgerIDs(ctx context.Context, accountID string) ([]string, error) {
 	return listIDs(ctx, r.db, "list account ledgers", `SELECT id::text FROM ledger.ledgers

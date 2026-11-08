@@ -633,6 +633,70 @@
       }
     },
     {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Archiver steps by table and outcome (daily; 7-year retention)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (step, table, outcome) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.archive\" [25h]))",
+          "legendFormat": "{{table}} {{step}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 73
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Archiver failures and legal-hold skips by reason",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (reason, step) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.archive\" | outcome=~\"failure|denied\" [25h]))",
+          "legendFormat": "{{reason}} {{step}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 73
+      }
+    },
+    {
       "id": 103,
       "type": "row",
       "title": "Event streaming",
@@ -642,7 +706,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 81
       }
     },
     {
@@ -657,7 +721,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 82
       },
       "targets": [
         {
@@ -698,7 +762,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 82
       },
       "targets": [
         {
@@ -728,7 +792,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 90
       }
     },
     {
@@ -743,7 +807,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 83
+        "y": 91
       },
       "targets": [
         {
@@ -775,7 +839,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 83
+        "y": 91
       },
       "targets": [
         {
@@ -814,7 +878,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 99
       }
     },
     {
@@ -829,7 +893,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 100
       },
       "targets": [
         {
@@ -859,7 +923,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 109
       },
       "targets": [
         {
