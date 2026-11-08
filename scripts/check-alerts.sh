@@ -12,7 +12,7 @@ GRAFANA="${GRAFANA_URL:-http://localhost:3000}"
 LOKI="${LOKI_URL:-http://localhost:3100}"
 AUTH="${GRAFANA_ADMIN_USER:-admin}:${GRAFANA_ADMIN_PASSWORD:-admin}"
 DASHBOARD="$(dirname "$0")/../deploy/grafana/dashboards/ledger.json"
-RULES=(ledger-success-ratio ledger-outbox-lag ledger-stuck-pending ledger-fraud-freeze-failing ledger-reconcile-failure)
+RULES=(ledger-success-ratio ledger-outbox-lag ledger-stuck-pending ledger-fraud-freeze-failing ledger-reconcile-failure ledger-partitions-running-out)
 
 fail() { echo "FAIL $*"; exit 1; }
 
@@ -100,6 +100,8 @@ worker.append(line(level="warn", service="ledger-worker", message="stuck transac
 worker.append(line(level="error", service="ledger-worker", message="reconcile mismatch", event="ledger.reconcile",
                    outcome="failure", reason="balance_mismatch", mode="incremental", check=1, field="balance",
                    expected=100, actual=107, ledger_id="00000000-0000-0000-0000-000000000000"))
+worker.append(line(level="error", service="ledger-worker", message="ledger partitions running out", event="ledger.partition",
+                   outcome="failure", reason="insufficient_future_partitions", table="journal_entries", future_months=1))
 fraud = [line(level="error", service="fraud-engine", message="fraud freeze still failing, retrying", event="fraud.decision",
               outcome="failure", reason="freeze_call_failed", rule="topup_velocity")]
 streams = []

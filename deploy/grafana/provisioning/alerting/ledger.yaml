@@ -165,3 +165,35 @@ groups:
             not run (pg_error). Each mismatch is its own ledger.reconcile event with check, field, expected and
             actual. A carried mismatch is reported every RECONCILE_INTERVAL until repaired. Nothing is corrected
             automatically: repair with a VOID or a reviewed `ledger-worker rebuild-projections`.
+
+      - uid: ledger-partitions-running-out
+        title: Ledger partitions running out
+        condition: B
+        data:
+          - refId: A
+            # The job runs hourly; 2 h spans at least one run.
+            relativeTimeRange: {from: 7200, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="ledger-worker"} | json | event="ledger.partition" | outcome="failure" [2h]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: ticket, service: ledger-worker}
+        annotations:
+          summary: 'The partition job failed: fewer than 2 future monthly partitions, or it could not create them.'
+          description: >-
+            journal_entries and events have no DEFAULT partition, so a write dated past the last partition fails.
+            insufficient_future_partitions names the table; pg_error carries the error. Create them by hand with
+            SELECT ledger.ensure_partitions((now() AT TIME ZONE 'UTC')::date, 4); a table squatting on a
+            partition's name (ledger.<table>_yYYYYmMM that isn't a partition) makes ensure_partitions skip that month.
