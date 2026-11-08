@@ -466,7 +466,7 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Reconcile failures by reason (reconciler lands in P5)",
+      "title": "Reconcile failures by reason and check (page on any)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -478,8 +478,8 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (reason) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.reconcile\" | outcome=\"failure\" [5m]))",
-          "legendFormat": "{{reason}}"
+          "expr": "sum by (reason, check) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.reconcile\" | outcome=\"failure\" [5m]))",
+          "legendFormat": "{{reason}} {{check}}"
         }
       ],
       "fieldConfig": {
@@ -496,6 +496,79 @@
       }
     },
     {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Reconcile runs: clean by mode (incremental every RECONCILE_INTERVAL, full daily)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (mode) (count_over_time({service=\"ledger-worker\"} | json | event=\"ledger.reconcile\" | outcome=\"success\" [5m]))",
+          "legendFormat": "{{mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 57
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Reconcile run duration (ms) and rows checked",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "max by (mode) (max_over_time({service=\"ledger-worker\"} | json | event=\"ledger.reconcile\" | outcome=\"success\" | unwrap duration_ms [15m]))",
+          "legendFormat": "{{mode}} ms"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "max by (mode) (max_over_time({service=\"ledger-worker\"} | json | event=\"ledger.reconcile\" | outcome=\"success\" | unwrap transactions [15m]))",
+          "legendFormat": "{{mode}} transactions"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 57
+      }
+    },
+    {
       "id": 103,
       "type": "row",
       "title": "Event streaming",
@@ -505,7 +578,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 65
       }
     },
     {
@@ -520,7 +593,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 66
       },
       "targets": [
         {
@@ -561,7 +634,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 58
+        "y": 66
       },
       "targets": [
         {
@@ -591,7 +664,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 74
       }
     },
     {
@@ -606,7 +679,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 67
+        "y": 75
       },
       "targets": [
         {
@@ -638,7 +711,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 67
+        "y": 75
       },
       "targets": [
         {
@@ -677,7 +750,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 83
       }
     },
     {
@@ -692,7 +765,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 84
       },
       "targets": [
         {
@@ -722,7 +795,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 93
       },
       "targets": [
         {

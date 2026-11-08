@@ -134,3 +134,34 @@ groups:
             A rule fired but the account was not frozen. freeze_call_failed: ledger-api unreachable or failing
             (the engine keeps retrying and does not commit the offset). freeze_rejected: a 4xx, usually the
             fraud-engine token or its freeze grant in LEDGER_CLIENTS (the event was skipped).
+
+      - uid: ledger-reconcile-failure
+        title: Ledger reconciler found a mismatch
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="ledger-worker"} | json | event="ledger.reconcile" | outcome="failure" [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: page, service: ledger-worker}
+        annotations:
+          summary: '{{ if and $values.A $values.A.Value }}{{ $values.A.Value }}{{ else }}Some{{ end }} reconcile failure(s) in 5 minutes.'
+          description: >-
+            A projection no longer equals the fold of the journal and events (TRD §7.6), or the reconciler could
+            not run (pg_error). Each mismatch is its own ledger.reconcile event with check, field, expected and
+            actual. A carried mismatch is reported every RECONCILE_INTERVAL until repaired. Nothing is corrected
+            automatically: repair with a VOID or a reviewed `ledger-worker rebuild-projections`.

@@ -13,9 +13,9 @@ make smoke-ledger         # open account -> credit -> debit -> NSF -> replay -> 
 | :--- | :--- |
 | API | http://localhost:8080 |
 | ledger-api | http://localhost:8081, bound to 127.0.0.1 only |
-| ledger-worker | no published port; background jobs (outbox relay to Kafka, sweeper, idempotency and outbox purges) |
+| ledger-worker | no published port; background jobs (outbox relay to Kafka, sweeper, reconciler, idempotency and outbox purges). The reconciler checks that balances, sequences, double entries and projections match the journal and events every `RECONCILE_INTERVAL` (default 1m), with a full sweep daily |
 | fraud-engine | no published port; consumes `ledger.events.v1` and freezes accounts on `topup_velocity` (more than 3 top-ups in 5 m) or `debit_volume` (more than 30 debits, or over the currency limit, in 1 h). `make smoke-fraud` checks it end to end |
-| Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview**; alert rules in folder **ledger** (success ratio, outbox lag, stuck PENDING). `make check-alerts` verifies them |
+| Grafana | http://localhost:3000 (admin / admin), dashboards **auth-api overview** and **ledger overview**; alert rules in folder **ledger** (success ratio, outbox lag, stuck PENDING, fraud freeze failing, reconcile failure). `make check-alerts` verifies them |
 | Loki | http://localhost:3100 |
 | Alloy UI | http://localhost:12345 |
 | Kafka | `127.0.0.1:9094` from the host (containers use `kafka:9092`); topic `ledger.events.v1`, 12 partitions. `make kafka-topics` describes it |
@@ -159,7 +159,7 @@ The token lifetime is fixed at 1 hour (`service.TokenTTL`) and is intentionally 
 ```
 cmd/api/              auth-api entrypoint
 cmd/ledger-api/       ledger-api entrypoint
-cmd/ledger-worker/    ledger-worker entrypoint (outbox relay, sweeper, purges)
+cmd/ledger-worker/    ledger-worker entrypoint (outbox relay, sweeper, reconciler, purges)
 cmd/fraud-engine/     fraud-engine entrypoint (velocity rules → freeze)
 internal/startup/     dependency retry, graceful serve, container healthcheck (shared by cmd/*)
 internal/ledger/      ledger domain: money, events, state machines, Decide (no I/O)

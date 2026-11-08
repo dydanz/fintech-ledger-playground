@@ -205,6 +205,7 @@ CREATE TABLE ledger.accounts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX accounts_updated_idx ON ledger.accounts (updated_at);  -- migration 005: reconciler scope (§7.6)
 
 CREATE TABLE ledger.ledgers (
     id              UUID        PRIMARY KEY,
@@ -249,6 +250,7 @@ CREATE TABLE ledger.transactions (
 );
 CREATE INDEX transactions_account_created_idx ON ledger.transactions (account_id, created_at DESC, id DESC);
 CREATE INDEX transactions_pending_idx         ON ledger.transactions (created_at) WHERE status = 'PENDING';
+CREATE INDEX transactions_updated_idx         ON ledger.transactions (updated_at);  -- migration 005: reconciler scope (§7.6)
 -- At most one void per original that is in flight or settled. A FAILED void can be retried.
 CREATE UNIQUE INDEX transactions_single_void_key ON ledger.transactions (original_transaction_id)
     WHERE type = 'VOID' AND status IN ('PENDING', 'PROCESSING', 'SETTLED');
@@ -653,6 +655,23 @@ Every `RECONCILE_INTERVAL` (default 1m), for ledgers touched since the last wate
 
 Any mismatch emits `ledger.reconcile` with outcome `failure`, which pages (§11.3). The reconciler never auto-corrects. Fixes go through a VOID or a reviewed rebuild.
 
+**Implementation (P5.1).** The reconciler is the ledger-worker job `reconciler` (`service.Reconciler`, reads in `repository.ReconcileRepo`).
+- **Snapshots.** Each batch of 500 ids is read in one `REPEATABLE READ READ ONLY` transaction, so a projection row and the journal lines or events it's compared with come from the same commit point. It takes no locks and doesn't block writes.
+- **Incremental runs.**
+  - **Scope.** A run checks:
+    - transactions with `updated_at` after the watermark (migration 005 indexes it);
+    - the USER ledgers those transactions post to;
+    - accounts with `updated_at` after the watermark.
+  - **Watermark.** The watermark is the previous successful run's start, read from the Postgres clock (the one that stamps `updated_at`, so worker clock skew doesn't matter), minus an overlap: `max(1m, 2 × LEDGER_PROCESS_TIMEOUT)`. `updated_at` is a transaction's start time, so the overlap covers rows committed after a run began. A failed run (`pg_error`) leaves the watermark unchanged.
+  - **Verified points.** Per ledger, the worker remembers the last `(sequence, balance)` it found consistent, and incremental runs read only the journal after that point.
+- **Full sweep.** It runs on the leader's first run, then every 24 h ("nightly"). It covers:
+  - every transaction, USER ledger and account, each ledger from its latest checkpoint;
+  - the whole-journal parts of check 3: every currency's lines sum to 0, and no line belongs to a transaction that isn't SETTLED or VOIDED.
+
+  The state lives in the leader's memory, so after a failover the new leader begins with a full sweep.
+- **Carried mismatches.** Whatever a run found broken is checked again on every later run until it's clean, so the alert keeps firing until the data is repaired. If a direct write changes a row without touching `updated_at`, the incremental runs don't see it; the next full sweep does.
+- **Check 4** covers transactions (status, version, type, amount, currency, account, ledger, failure reason, original, requested_by) and accounts (status, version, user, and the set of USER ledgers), each folded with `ledger.FoldTransaction` / `FoldAccount`. A payload that doesn't decode, or a stream that doesn't fold, is itself `projection_drift`.
+
 ### 7.7 Partition maintenance
 
 The worker keeps monthly partitions created at least 3 months ahead for `journal_entries` and `events`, each with its local unique indexes (§5.1). If fewer than 2 future partitions exist, it logs `ledger.partition` with outcome `failure`, which raises an alert. There is no DEFAULT partition, because one would make adding partitions later require a scan.
@@ -761,7 +780,7 @@ Never log: `reference`, `metadata`, the raw `Idempotency-Key`, service tokens or
 | `ledger.recover` | C3 | success=warn, failure=error | `stuck_pending`, `processing_timeout`; failure: `pg_error`, `timeout` | sweeper |
 | `ledger.purge` | C2 | success=info, failure=error | `pg_error` | idempotency purge |
 | `app.leader` | C5 | success=info, failure=warn | `pg_error`, `connection_lost` | `worker.Runner` |
-| `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift` | reconciler |
+| `ledger.reconcile` | C3 | success=info (summary), failure=error | `balance_mismatch`, `sequence_gap`, `unbalanced_transaction`, `projection_drift`; run level: `mismatches_found`, `pg_error` | reconciler (one event per mismatch, with `check`, `field`, `expected`, `actual`; at most 100 per run, then a summary) |
 | `ledger.partition` | C5 | success=info, failure=error | `insufficient_future_partitions`, `pg_error` | partitions job |
 | `ledger.archive` | C2 | success=info, failure=error | `export_failed`, `verify_failed`, `detach_failed`, `legal_hold` | archiver |
 | `outbox.publish` | C4 | failure=warn (retrying) / error (batch abandoned) | `kafka_unavailable`, `kafka_rejected`, `pg_error` | relay |
@@ -796,7 +815,8 @@ P3 adds `deploy/grafana/provisioning/alerting/ledger.yaml`: folder `ledger`, gro
   - **Outbox lag:** `max_over_time(lag_ms)`. `outbox.lag` doubles as the relay's heartbeat, so no data for 2 m is `Alerting`.
   - **Stuck PENDING:** any `ledger.recover` with `processing_timeout`.
   - **P4.2:** "fraud freeze failing" is `fraud.decision` failures > 0 in 5 m (page).
-  - **Later phases:** the reconcile and partition rules land with P5.
+  - **P5.1:** "reconcile failure" is any `ledger.reconcile` failure in 5 m (page). This includes `pg_error`, because a run that can't complete proves nothing.
+  - **Later phases:** the partition rule lands with P5.3.
 - **Verification.** `make check-alerts` (`scripts/check-alerts.sh`) checks four things:
   - the rules are provisioned;
   - every dashboard query runs on Loki;
