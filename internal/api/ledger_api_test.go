@@ -64,7 +64,7 @@ type ledgerHarness struct {
 func newLedgerHarness(t *testing.T) *ledgerHarness {
 	t.Helper()
 	pool := pgtest.New(t)
-	store := &flakyStore{LedgerStore: repository.NewLedgerRepo(pool, outbox.DefaultTopic)}
+	store := &flakyStore{LedgerStore: repository.NewLedgerRepo(pool, outbox.DefaultTopic, nil)}
 	srv, logs, sessions := newLedgerRouter(t, store)
 	var userA string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO users (email, password_hash) VALUES ('a@x.io', 'x') RETURNING id`).Scan(&userA); err != nil {

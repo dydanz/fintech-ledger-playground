@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"auth-api/internal/ledger"
+	"auth-api/internal/outbox"
 )
 
 var (
@@ -174,8 +175,9 @@ type LedgerTx interface {
 
 	// PostJournal writes both lines of a transaction in one statement.
 	PostJournal(ctx context.Context, user, counterparty JournalLine) error
-	// AppendEvent writes e to ledger.events and its envelope to ledger.outbox,
-	// and notifies the relay. It returns e with the stored OccurredAt.
+	// AppendEvent writes e to ledger.events and its envelope to ledger.outbox;
+	// the relay is woken once the transaction commits. It returns e with the
+	// stored OccurredAt.
 	AppendEvent(ctx context.Context, e ledger.Event, ledgerID string) (ledger.Event, error)
 
 	// InsertIdempotencyKey claims a key. It reports false if an unexpired row
@@ -196,13 +198,16 @@ type dbtx interface {
 
 // LedgerRepo is the PostgreSQL access layer for schema ledger.
 type LedgerRepo struct {
-	db    *pgxpool.Pool
-	topic string
+	db       *pgxpool.Pool
+	topic    string
+	notifier *outbox.Notifier
 }
 
-// NewLedgerRepo returns a repository whose outbox rows target topic.
-func NewLedgerRepo(db *pgxpool.Pool, topic string) *LedgerRepo {
-	return &LedgerRepo{db: db, topic: topic}
+// NewLedgerRepo returns a repository whose outbox rows target topic. After a
+// transaction that wrote outbox rows commits, it calls notifier.Notify to wake
+// the relay; a nil notifier leaves the relay to its poll.
+func NewLedgerRepo(db *pgxpool.Pool, topic string, notifier *outbox.Notifier) *LedgerRepo {
+	return &LedgerRepo{db: db, topic: topic, notifier: notifier}
 }
 
 // InTx runs fn in one READ COMMITTED transaction and commits if fn returns
@@ -220,11 +225,15 @@ func (r *LedgerRepo) InTx(ctx context.Context, timeout time.Duration, fn func(Le
 	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $1, true)`, ms); err != nil {
 		return mapTxErr(fmt.Errorf("set timeouts: %w", err))
 	}
-	if err := fn(&pgLedgerTx{q: ledgerQueries{db: tx, topic: r.topic}}); err != nil {
+	var wrote bool
+	if err := fn(&pgLedgerTx{q: ledgerQueries{db: tx, topic: r.topic, wrote: &wrote}}); err != nil {
 		return mapTxErr(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return mapTxErr(fmt.Errorf("commit: %w", err))
+	}
+	if wrote {
+		r.notifier.Notify()
 	}
 	return nil
 }

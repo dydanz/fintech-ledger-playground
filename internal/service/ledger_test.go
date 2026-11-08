@@ -65,7 +65,7 @@ type svcEnv struct {
 func newSvcEnv(t *testing.T, timeout time.Duration) *svcEnv {
 	t.Helper()
 	pool := pgtest.New(t)
-	store := &faultStore{LedgerStore: repository.NewLedgerRepo(pool, outbox.DefaultTopic)}
+	store := &faultStore{LedgerStore: repository.NewLedgerRepo(pool, outbox.DefaultTopic, nil)}
 	cfg := testConfig()
 	cfg.ProcessTimeout = timeout
 	svc, err := service.NewLedgerService(store, cfg)
@@ -173,7 +173,7 @@ func TestOpenAccount(t *testing.T) {
 	wantEvent(t, e.logs, "ledger.account_open", map[string]any{"outcome": "success", "account_id": acct.ID, "created": true})
 
 	// The account stream folds to the projection.
-	events, err := repository.NewLedgerRepo(e.pool, outbox.DefaultTopic).ListStreamEvents(e.ctx, acct.ID)
+	events, err := repository.NewLedgerRepo(e.pool, outbox.DefaultTopic, nil).ListStreamEvents(e.ctx, acct.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestCreditThenDebitSettle(t *testing.T) {
 	}
 
 	// Projection == fold, journal balances, one outbox row per event.
-	repo := repository.NewLedgerRepo(e.pool, outbox.DefaultTopic)
+	repo := repository.NewLedgerRepo(e.pool, outbox.DefaultTopic, nil)
 	for _, id := range []string{cr.ID, db.ID} {
 		events, err := repo.ListStreamEvents(e.ctx, id)
 		if err != nil {

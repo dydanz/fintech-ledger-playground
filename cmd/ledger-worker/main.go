@@ -67,7 +67,10 @@ func run(cfg config.WorkerConfig, log *slog.Logger) error {
 	}
 	defer db.Close()
 
-	repo := repository.NewLedgerRepo(db, cfg.EventsTopic)
+	// The sweeper's events wake the relay like ledger-api's (outbox.Notifier).
+	notifier := outbox.NewNotifier(db, 10*time.Millisecond)
+	go notifier.Run(ctx)
+	repo := repository.NewLedgerRepo(db, cfg.EventsTopic, notifier)
 	// No Redis cache here: Postgres is the authority, and a response the
 	// sweeper completes is cached by ledger-api on its first replay.
 	ledgerSvc, err := service.NewLedgerService(repo, service.LedgerConfig{

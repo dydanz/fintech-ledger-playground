@@ -500,7 +500,7 @@ func req(key string) service.Request {
 
 func (e *env) ledgerAccount(email string) (*service.LedgerService, string) {
 	e.t.Helper()
-	svc, err := service.NewLedgerService(repository.NewLedgerRepo(e.pool, e.topic), service.LedgerConfig{
+	svc, err := service.NewLedgerService(repository.NewLedgerRepo(e.pool, e.topic, nil), service.LedgerConfig{
 		Currencies: []string{"IDR"}, MaxAmount: 1_000_000_000, ProcessTimeout: 5 * time.Second, IdempotencyTTL: time.Hour})
 	if err != nil {
 		e.t.Fatal(err)

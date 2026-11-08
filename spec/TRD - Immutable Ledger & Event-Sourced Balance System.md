@@ -489,7 +489,7 @@ Tx1  (READ COMMITTED, short)
     └─ conflict → SELECT existing → §6.4 (replay / 409 / 422), backfill Redis if completed
   INSERT transactions (status=PENDING, version=1)
   INSERT events TransactionRequested (stream_version=1)
-  INSERT outbox; NOTIFY ledger_outbox
+  INSERT outbox            -- after COMMIT: NOTIFY ledger_outbox (coalesced, §7.3)
 COMMIT   ← the request is now durable (zero data loss); the client may safely retry from here
   ▼
 Tx2  (READ COMMITTED, lock_timeout & statement_timeout = LEDGER_PROCESS_TIMEOUT)
@@ -512,7 +512,7 @@ Tx2  (READ COMMITTED, lock_timeout & statement_timeout = LEDGER_PROCESS_TIMEOUT)
   on FAILED:
     append TransactionFailed (v3); projection → FAILED, failure_reason
   UPDATE idempotency_keys SET response_status, response_body
-  INSERT outbox rows for every event appended; NOTIFY ledger_outbox
+  INSERT outbox rows for every event appended   -- after COMMIT: NOTIFY (§7.3)
 COMMIT
   ▼
 Redis SET idem:… (response, PX = remaining TTL)  -- best effort, after commit
@@ -546,7 +546,7 @@ Tx: SELECT … FROM accounts WHERE id=$acct FOR UPDATE
     already in target state → no event, return 200 (idempotent)
     append AccountFrozen | AccountUnfrozen (version+1) {reason, actor=client_id, rule?}
     UPDATE accounts SET status, version
-    INSERT idempotency_keys (operation=freeze|unfreeze, resource_id=account_id, response) ; INSERT outbox ; NOTIFY
+    INSERT idempotency_keys (operation=freeze|unfreeze, resource_id=account_id, response) ; INSERT outbox   -- NOTIFY after COMMIT
 COMMIT
 ```
 
@@ -573,6 +573,7 @@ Implemented in P2.3:
 - **Relay loop.**
   - The relay is the single leader holding advisory lock `ledger_outbox_relay`.
   - It wakes on `LISTEN ledger_outbox` or every `OUTBOX_POLL_INTERVAL` (default 200ms).
+  - **Who sends the `NOTIFY`.** Not the write transaction. A Postgres transaction that calls `NOTIFY` takes a database-wide lock at `COMMIT` and holds it through the WAL flush, so notifying inside every write makes all writes commit one at a time. The P6.2 load test measured this: p99 314 ms against the 150 ms target at 500 TPS, with up to 30 backends queued on `Lock:object` (`AccessExclusiveLock` on `pg_database`). Instead, `LedgerRepo.InTx` calls `outbox.Notifier.Notify` after a commit that wrote outbox rows. The notifier (one per ledger-api and ledger-worker process) sends at most one `pg_notify` per 10 ms, as its own statement; that transaction writes no WAL, so it holds the lock only briefly. Patching the `NOTIFY` out brought p99 to 118 ms with lag p99 243 ms (polling only). A failed `NOTIFY` is logged once per outage as `dependency.call` (`operation=outbox_notify`) and costs only latency: the relay still polls.
   - Each wake it runs `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT OUTBOX_BATCH_SIZE` (default 500) and produces the batch.
   - After the broker acknowledges with `acks=all`, it sets `UPDATE … SET published_at = now()`.
   - It doesn't keep a cursor, so a row that commits late (a lower `id` committing after a higher one) is still picked up.
@@ -766,7 +767,7 @@ deploy/grafana/provisioning/alerting/ledger.yaml
 - `internal/startup` holds what every `cmd/*` binary shares: `Retry` (emits `dependency.connect`), `ConnectPostgres`, `Serve` (graceful shutdown, `app.lifecycle`) and `Healthcheck`. HTTP services share one base engine (middleware chain, JSON 404/405, `/healthz`, `/readyz`).
 - `ClientAuth` doesn't add `client_id` to the request logger: the service already puts it on its events, and `AccessLog` adds it to the request record, so no record carries the key twice.
 - In-transaction operations are the `repository.LedgerTx` interface; `LedgerRepo.InTx(ctx, timeout, fn)` runs `fn` in one READ COMMITTED transaction with `lock_timeout`/`statement_timeout` set, and returns `repository.ErrTimeout` when either fires. The interface lives in `repository` (not `service`) because the callback's parameter type must be nameable by both and `service` already imports `repository`. The service declares a `LedgerStore` interface with `InTx` and the pool-level reads, so service tests can use fakes, as the existing tests do.
-- `LedgerTx.AppendEvent` writes the `events` row, its `outbox` row and the `NOTIFY` together, so no transition can be recorded without being published (FR-07).
+- `LedgerTx.AppendEvent` writes the `events` row and its `outbox` row in the same transaction, so no transition can be recorded without being published (FR-07). The relay is woken after the commit, not inside it (§7.3).
 - New dependencies: `github.com/google/uuid` (UUIDv7), `github.com/twmb/franz-go`, and `github.com/parquet-go/parquet-go` (archiver, P5) with an S3 client.
 
 ---
@@ -776,7 +777,7 @@ deploy/grafana/provisioning/alerting/ledger.yaml
 | ID | Requirement | Target | How it is met | How it is verified |
 | :--- | :--- | :--- | :--- | :--- |
 | NFR-1 | Throughput | ≥ 300 TPS sustained mixed writes; 600 TPS for 5 min | Stateless api replicas, two short PG transactions per request, no locked hotspot rows (system ledgers unlocked), pgxpool (`max_conns` 32 per replica) | k6 test (§13.4) |
-| NFR-2 | Write latency | p99 ≤ 150 ms; p50 ≤ 30 ms at 300 TPS | Single-row locks, indexes on every lock path, `LISTEN/NOTIFY` keeps the relay off the hot path | `http.request` `latency_ms` on ledger routes |
+| NFR-2 | Write latency | p99 ≤ 150 ms; p50 ≤ 30 ms at 300 TPS | Single-row locks, indexes on every lock path; the relay is woken by a coalesced `NOTIFY` sent after commit, never inside the write transaction (§7.3) | `http.request` `latency_ms` on ledger routes |
 | NFR-3 | Read latency | Balance p99 ≤ 30 ms | Primary-key read of the `ledgers` projection on the **primary**, for read-your-writes. History can go to a read replica. | Same |
 | NFR-4 | Consistency | No double-spend; balance ≥ floor at all times | §7.1 locking plus the CHECK constraint; CP rather than AP: a PG outage returns 503, never accepts unsafely | Concurrency integration tests (§13.3); reconciler |
 | NFR-5 | Success ratio | ≥ 99.99% | Formula below | Dashboard and alert (§11.3) |

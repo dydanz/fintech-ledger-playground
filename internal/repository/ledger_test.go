@@ -34,7 +34,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	pool := pgtest.New(t)
-	return &env{t: t, ctx: context.Background(), pool: pool, repo: repository.NewLedgerRepo(pool, outbox.DefaultTopic)}
+	return &env{t: t, ctx: context.Background(), pool: pool, repo: repository.NewLedgerRepo(pool, outbox.DefaultTopic, nil)}
 }
 
 func (e *env) user(email string) string {
@@ -330,28 +330,68 @@ func TestUnbalancedJournalFailsAtCommit(t *testing.T) {
 	}
 }
 
-func TestAppendEventNotifiesRelayOnCommit(t *testing.T) {
+// The relay is woken after a commit that wrote outbox rows, never from
+// inside the write transaction (the NOTIFY lock serialized every commit), and
+// not at all for a rollback or a transaction without outbox rows.
+func TestOutboxCommitNotifiesRelay(t *testing.T) {
 	e := newEnv(t)
 	accountID, _ := e.account("n@example.com")
+	ctx, cancel := context.WithCancel(e.ctx)
+	defer cancel()
+	notifier := outbox.NewNotifier(e.pool, time.Millisecond)
+	go notifier.Run(ctx)
+	repo := repository.NewLedgerRepo(e.pool, outbox.DefaultTopic, notifier)
 
 	conn, err := e.pool.Acquire(e.ctx)
 	e.must(err)
 	defer conn.Release()
 	_, err = conn.Exec(e.ctx, "LISTEN "+outbox.NotifyChannel)
 	e.must(err)
-
-	e.must(e.inTx(func(tx repository.LedgerTx) error {
-		_, err := tx.AppendEvent(e.ctx, ledger.Event{StreamID: accountID, StreamVersion: 1, AccountID: accountID,
+	wait := func(d time.Duration) error {
+		wctx, cancel := context.WithTimeout(e.ctx, d)
+		defer cancel()
+		_, err := conn.Conn().WaitForNotification(wctx)
+		return err
+	}
+	appendEvent := func(tx repository.LedgerTx, version int64) error {
+		_, err := tx.AppendEvent(e.ctx, ledger.Event{StreamID: accountID, StreamVersion: version, AccountID: accountID,
 			Payload: ledger.AccountOpened{UserID: "u"}, TraceID: traceID}, "")
 		return err
-	}))
-
-	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
-	defer cancel()
-	n, err := conn.Conn().WaitForNotification(ctx)
-	if err != nil || n.Channel != outbox.NotifyChannel {
-		t.Fatalf("notification = %+v, %v", n, err)
 	}
+
+	rollback := errors.New("rollback")
+	if err := repo.InTx(e.ctx, time.Second, func(tx repository.LedgerTx) error {
+		e.must(appendEvent(tx, 1))
+		return rollback
+	}); !errors.Is(err, rollback) {
+		t.Fatalf("rolled back tx: %v", err)
+	}
+	e.must(repo.InTx(e.ctx, time.Second, func(tx repository.LedgerTx) error {
+		_, err := tx.GetAccountByUserID(e.ctx, "00000000-0000-0000-0000-000000000000")
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil
+		}
+		return err
+	}))
+	if err := wait(200 * time.Millisecond); err == nil {
+		t.Fatal("notified after a rollback or a transaction without outbox rows")
+	}
+
+	// Woken by the notification, the relay must already see the row: the
+	// commit happens before the NOTIFY, and nothing else notifies here.
+	committed := make(chan error, 1)
+	go func() {
+		committed <- repo.InTx(e.ctx, time.Second, func(tx repository.LedgerTx) error { return appendEvent(tx, 1) })
+	}()
+	if err := wait(2 * time.Second); err != nil {
+		t.Fatalf("no notification after commit: %v", err)
+	}
+	var visible int
+	e.must(e.pool.QueryRow(e.ctx, `SELECT count(*) FROM ledger.outbox WHERE msg_key = $1`, accountID).Scan(&visible))
+	if visible != 1 {
+		t.Fatalf("notified while the outbox row was not yet committed (%d visible)", visible)
+	}
+	e.must(<-committed)
 }
 
 func TestIdempotencyKeyLifecycle(t *testing.T) {
