@@ -966,6 +966,10 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 - Pass criteria:
   - NFR-1, NFR-2, NFR-5 and NFR-8 targets are met.
   - The reconciler reports clean afterwards.
+- **Implemented in P6.2** (`make load-up`, `make load`; `scripts/load/ledger-mixed.js` and `run.sh`). Results are in `spec/Load Test Results - Immutable Ledger.md`. On a Docker Desktop laptop:
+  - **Met:** NFR-5 (100.00%, no `processing_timeout`), NFR-8 (lag p99 980 ms) and the reconciler check (clean full sweep of 1.08 M transactions).
+  - **Not confirmed:** NFR-1 and NFR-2. Commits wait on the VM disk's flush, 60–314 ms per device flush under load. With `synchronous_commit=off`, as a diagnostic, the same load gave a steady p99 of 50 ms. Both need a run on server-class storage.
+  - **Code bottleneck found and fixed (§7.3):** `NOTIFY` inside every write transaction serialized all commits.
 
 ### 13.5 Chaos (manual runbook in P5)
 

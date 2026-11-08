@@ -1,6 +1,6 @@
 // Minimal load for the outbox lag check (spec/TRD §14 P3 exit): credits at
 // a constant RATE (default 300/s) for DURATION across ACCOUNTS accounts.
-// Run with `make load`; scripts/load/outbox-lag.sh samples the lag meanwhile.
+// Run with `make load-credits`; scripts/load/outbox-lag.sh samples the lag meanwhile.
 import http from 'k6/http';
 import { check } from 'k6';
 

@@ -202,6 +202,17 @@ make test-integration   # TEST_DATABASE_URL / TEST_KAFKA_BROKERS default to the 
 
 `pgtest.New(t)` (in `internal/testutil/pgtest`) creates a throwaway database for each test, applies every `migrations/*.up.sql` in order, and drops the database afterwards. Tests are skipped when `TEST_DATABASE_URL` is unset. The role needs `CREATEDB`, which the compose `auth` role has.
 
+**Load tests** (TRD §13.4; results in `spec/Load Test Results - Immutable Ledger.md`):
+
+```bash
+make load-up             # make up with the fraud thresholds raised, so the run measures writes, not freezes
+make load                # PROFILE=full: 30 min at 300 TPS (60% debit, 35% credit, 5% void) across 10,000 accounts
+                         # + 10 hot accounts at 20 TPS each, then 600 TPS for 5 min
+make load PROFILE=quick  # the same shape in about 2 minutes, across 1,000 accounts
+```
+
+`scripts/load/run.sh` inserts the load users straight into Postgres (registering 10,000 through auth-api at bcrypt cost 12 would take most of an hour), runs `scripts/load/ledger-mixed.js` in k6, samples the outbox lag, then reports the transaction outcomes, `FAILED processing_timeout`, server-side write latency from Loki, and a full reconciler sweep. k6 exits non-zero when an NFR threshold fails. Results go to `load-results/<run>/`. Use a throwaway compose project (`COMPOSE_PROJECT_NAME=…`) to keep the load data out of your stack. `make load-credits` is the older credits-only outbox lag check.
+
 ## Not included (next steps)
 
 - Rate limiting and lockout on `/login`

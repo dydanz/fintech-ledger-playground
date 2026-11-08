@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
+.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -33,7 +33,15 @@ logs-worker:
 logs-fraud:
 	docker compose logs -f fraud-engine
 
-load: ## k6 credits at RATE/s for DURATION; prints the max outbox lag (needs make up)
+PROFILE ?= full
+load: ## TRD §13.4 ledger load (PROFILE=full: 30 min at 300 TPS + 10 hot accounts, then 600 TPS for 5 min; PROFILE=quick: ~2 min). Start with make load-up
+	PROFILE=$(PROFILE) ./scripts/load/run.sh
+
+load-up: ## make up for a load run: fraud thresholds out of the way (it measures writes, not freezes) and production-like Postgres memory and WAL settings
+	FRAUD_TOPUP_MAX=1000000000 FRAUD_DEBIT_MAX_COUNT=1000000000 FRAUD_DEBIT_LIMITS=IDR:1000000000000000 \
+	PG_SHARED_BUFFERS=1GB PG_MAX_WAL_SIZE=8GB PG_CHECKPOINT_TIMEOUT=15min PG_WAL_COMPRESSION=lz4 $(MAKE) up
+
+load-credits: ## k6 credits at RATE/s for DURATION; prints the max outbox lag (needs make up)
 	./scripts/load/outbox-lag.sh 60 & docker compose --profile load run --rm k6 run /scripts/ledger-credits.js; wait
 
 check-alerts: ## alert rules loaded, dashboard queries run, alerts trip on synthetic lines (needs make up)
