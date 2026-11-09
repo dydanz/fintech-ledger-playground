@@ -39,9 +39,9 @@ The runner also samples the outbox and in-flight transactions every second.
 
 Every recorded run also passed the common checks in §1 and had no host stalls. Each was followed by a clean full sweep: 0 mismatches over up to 96,962 transactions and 1,100 ledgers.
 
-**Two problems to fix:**
-- A Kafka outage blocks the outbox relay for its whole length, so the relay doesn't report lag or escalate errors while it lasts. The lag alert fired 4.5 minutes in, through its "no heartbeat" path (§6.1).
-- A hung (not dead) worker leader keeps its jobs indefinitely (§6.3). This is outside §13.5 and was found with an extra probe.
+**Problems found:**
+- **Fixed** (`fix/outbox-publish-stall`): a Kafka outage blocked the outbox relay for its whole length, so the relay didn't report lag or escalate errors while it lasted. The lag alert fired 4.5 minutes in, through its "no heartbeat" path. After the fix, the same drill fired the alert on the lag value 2.5 minutes in (§6.1).
+- **Open:** a hung (not dead) worker leader keeps its jobs indefinitely (§6.3). This is outside §13.5 and was found with an extra probe.
 
 ## 3. How to run a drill
 
@@ -91,7 +91,7 @@ The steps for a shared or production-like environment are the same as in the tab
 | Fault | Expected signals (Loki: `{service="…"} \| json \| event="…"`) | Not expected |
 | :--- | :--- | :--- |
 | Redis | ledger-api `dependency.call` warn, `dependency=redis`, `reason` `timeout` or `unknown`: two per write (§6.2). fraud-engine `dependency.call` warn while it retries. Writes stay 201 | Any 5xx; `ledger.idempotency` replays (there are none without retries) |
-| Kafka | `outbox.publish` warn `kafka_unavailable`, with the escalation to error logged only after recovery (§6.1). `outbox.lag` goes silent. The alert `Ledger outbox lag above 5 s` goes Pending at about 2.5 min and fires at about 4.5 min, on NoData. After recovery: one `outbox.lag` warn with the backlog, then lag 0 | Any write failure; outbox rows still unpublished a minute after Kafka is back |
+| Kafka | `outbox.publish` warn `kafka_unavailable` every 10–15 s (the 10 s publish timeout plus backoff), error from 1 minute on. `outbox.lag` warn every 30 s with the growing `pending` and `lag_ms`. The alert `Ledger outbox lag above 5 s` goes Pending within about 30 s and fires about 2.5 min in. After recovery: `outbox.lag` back to info, lag 0. (Before the fix in §6.1, `outbox.lag` went silent and the alert fired at about 4.5 min, on NoData.) | Any write failure; outbox rows still unpublished a minute after Kafka is back |
 | Postgres | Every write is 503 `ledger_unavailable`, answered quickly (access log: p50 3 ms, p99 95 ms, max 110 ms). ledger-api `ledger.credit`/`ledger.debit` failure `pg_error`. ledger-worker `app.leader` failure `connection_lost` and `pg_error`, then `acquired` again after recovery. `outbox.publish` failure `pg_error`. After recovery: `ledger.recover stuck_pending` for any write that committed only Tx1 | Requests hanging until the client timeout; `processing_timeout`; reconciler mismatches |
 | Worker | The surviving replica logs `app.leader state=acquired` for all 7 jobs within the 5 s `AcquireEvery`. Outbox lag peaks at about 1 s | Lag beyond a few seconds; any job without a leader |
 
@@ -140,7 +140,7 @@ The full sweep's counts grow from run to run because the drills share one databa
 
 ## 6. Findings
 
-### 6.1 A Kafka outage blocks the outbox relay, hiding the lag (bug, to fix)
+### 6.1 A Kafka outage blocked the outbox relay, hiding the lag (fixed)
 
 **What happened:**
 - The first publish after the stop failed at once (22:17:07, `unable to dial`). The relay's next batch of 500 rows then blocked: `Publish` returned only at 22:22:03, after Kafka was back, with `failing_ms=296244`. `OUTBOX_PUBLISH_TIMEOUT` is 10 s.
@@ -158,10 +158,27 @@ The full sweep's counts grow from run to run because the drills share one databa
 - the lag alert is late and misleading;
 - the publish error never escalates while the outage lasts.
 
-**Fix options (not yet decided):**
-- Make `Publish` return on context timeout, leaving the records in flight. The relay retries the batch, and the abandoned records may still be delivered later, as more duplicates (consumers already deduplicate on `event_id`).
-- Emit `outbox.lag` from its own ticker, so the heartbeat doesn't depend on publishing.
-- Both. Whichever is chosen, an integration test should stop a real broker.
+**Fix** (`fix/outbox-publish-stall`):
+- **Publish:** `kafka.Producer.Publish` returns when its context ends, leaving the records in flight. Until they settle it produces nothing new and waits for them instead. So however often the relay retries, an outage costs at most one extra copy of one batch.
+- **Heartbeat:** the relay logs `outbox.lag` from its own goroutine, so a slow or stuck publish can't silence it.
+- **Tests:**
+  - **Kafka tests:** a broker that holds produce requests unanswered (franz-go's `kfake`) reproduces the stall with the real client. `TestPublishReturnsAtTheDeadlineWhenTheBrokerStopsAnswering` and `TestPublishDoesNotRebufferWhileAnAbandonedBatchIsInFlight` both fail on the old `Publish`.
+  - **Relay test:** `TestLagIsReportedWhilePublishIsStuck` uses a publisher that ignores its context, and fails with the old inline heartbeat.
+
+**The drill after the fix** (run `1794220886`, commit `468ec06`):
+
+| | Before (run `1794176181`) | After |
+| :--- | :--- | :--- |
+| `outbox.publish` failures logged during the 5-minute outage | 2 (the error only at recovery) | 22, warn then error from 71 s on |
+| `outbox.lag` during the outage | none | every 30 s, `lag_ms` up to 287,606 |
+| Alert `Ledger outbox lag above 5 s` | Pending at 2.5 min on NoData, firing at 4.5 min | Pending at 33 s on the lag value, firing at 2 min 33 s |
+| Backlog cleared after Kafka started | 8 s | 11 s: the relay may be up to 5 s into its retry backoff when the broker returns |
+| Events delivered twice | 458 | 1 |
+| Lost events, data checks, full sweep | 0 lost, all pass, clean | 0 lost, all pass, clean |
+
+The table's backlog times are read from the 1 s samples: the first sample with at most 3 unpublished rows and lag under 100 ms. The runner's own "outbox drained" mark (9 s and 23 s) waits for a sample with exactly 0 unpublished rows. While writes continue, that depends on when the sample happens to land.
+
+The alert also showed `Pending (NoData)` in the first minute of the after run. That came from the stack itself: it had started 51 s before the fault, and Grafana's first evaluation, 24 s after the start, had no heartbeat in Loki yet. The NoData state cleared at 10:43:00, while the lag-value path stayed Pending and then fired.
 
 ### 6.2 A Redis outage adds about 190 ms to every write
 
