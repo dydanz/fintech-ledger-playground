@@ -980,6 +980,14 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 | Stop PG | 503 `ledger_unavailable`; no partial state; the sweeper finishes any PENDING after recovery |
 | Kill `ledger-worker` mid-batch | A new leader takes over within 10 s |
 
+**Implemented in P6.3** (`make chaos FAULT=redis|kafka|postgres|worker`; `scripts/chaos/run.sh`). The runbook and recorded results are in `spec/Chaos Runbook - Immutable Ledger.md`.
+
+- **Met:** all four faults behave as specified. Every write was answered (Postgres: after retries with the same key). The database, the balances and the Kafka topic matched what the client was told, and the reconciler was clean afterwards. Takeover took 2.2 s.
+- **Found:**
+  - A Kafka outage blocks the outbox relay in `Publish` despite `OUTBOX_PUBLISH_TIMEOUT`, so `outbox.lag` goes silent and the lag alert fires only on NoData.
+  - A Redis outage adds about 190 ms to every write.
+  - A hung (not dead) worker leader keeps its advisory locks, so no replica takes over.
+
 ---
 
 ## 14. Delivery plan
