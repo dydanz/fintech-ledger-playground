@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 // rebuild-projections (spec/TRD §7.6): recompute each projection row from the

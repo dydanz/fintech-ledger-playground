@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"auth-api/internal/kafka"
+	"fintech-ledger-playground/internal/kafka"
 )
 
 // stallingBroker is an in-process Kafka whose produce requests can be made

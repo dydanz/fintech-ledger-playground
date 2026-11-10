@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // RebuildStore is what rebuild-projections reads and writes (repository.RebuildRepo).

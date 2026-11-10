@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 // ledgerQueries holds the SQL for schema ledger, run against a pool (reads)

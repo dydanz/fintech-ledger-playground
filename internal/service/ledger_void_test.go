@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/idempotency"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 func (e *svcEnv) void(key, txID, reason string) (service.Response, error) {

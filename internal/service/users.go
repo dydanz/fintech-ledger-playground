@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/repository"
 )
 
 const (

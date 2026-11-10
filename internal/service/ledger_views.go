@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // Response is a finished HTTP response for a mutating ledger request. It is

@@ -13,10 +13,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 const (

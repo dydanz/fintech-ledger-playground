@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"auth-api/internal/idempotency"
+	"fintech-ledger-playground/internal/idempotency"
 )
 
 func TestValidKey(t *testing.T) {

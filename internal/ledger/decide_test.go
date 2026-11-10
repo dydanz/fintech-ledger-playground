@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 func pending(typ ledger.TransactionType, amount int64) ledger.Transaction {

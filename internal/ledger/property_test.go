@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 // op is one randomly generated request against a single ledger.

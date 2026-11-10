@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/kafka"
-	"auth-api/internal/logger"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/logger"
 )
 
 func TestSplitBrokers(t *testing.T) {

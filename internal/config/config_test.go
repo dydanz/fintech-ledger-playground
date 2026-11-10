@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/config"
+	"fintech-ledger-playground/internal/config"
 )
 
 var (

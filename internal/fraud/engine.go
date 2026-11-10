@@ -12,8 +12,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/kafka"
-	"auth-api/internal/logger"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/logger"
 )
 
 // Consumer is the engine's view of the Kafka consumer group.

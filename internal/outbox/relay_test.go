@@ -18,13 +18,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/kafka"
-	"auth-api/internal/logger"
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/testutil/kafkatest"
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/testutil/kafkatest"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 const trace = "4bf92f3577b34da6a3ce929d0e0e4736"

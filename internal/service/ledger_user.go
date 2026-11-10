@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // User reads (TRD §6.1): the account is always resolved from the session's

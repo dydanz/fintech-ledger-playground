@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"auth-api/internal/kafka"
+	"fintech-ledger-playground/internal/kafka"
 )
 
 // NewTopic creates a topic with partitions and returns the brokers and its

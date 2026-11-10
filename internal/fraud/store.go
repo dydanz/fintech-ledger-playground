@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 // WindowStore keeps each rule's recent events per key, scored by event time.

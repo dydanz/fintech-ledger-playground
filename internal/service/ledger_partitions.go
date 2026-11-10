@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"auth-api/internal/logger"
+	"fintech-ledger-playground/internal/logger"
 )
 
 // PartitionStore is what the partition job uses (repository.PartitionRepo).

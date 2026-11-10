@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 func TestNewAppliesMigrations(t *testing.T) {

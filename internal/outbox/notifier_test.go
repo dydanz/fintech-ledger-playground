@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"auth-api/internal/logger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 // fakeExec records each statement; it fails while err is set.

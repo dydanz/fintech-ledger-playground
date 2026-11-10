@@ -1,0 +1,17 @@
+2026-11-10T07:03:11Z run 1794294190 fault kafka: 50 writes/s across 100 accounts for 420s (warmup 30s, hold 300s, tail 90s)
+2026-11-10T07:03:12Z writes started
+2026-11-10T07:03:42Z FAULT stop kafka
+2026-11-10T07:04:13Z kafka down 30s: outbox pending 4625, alert ledger-outbox-lag: pending Pending
+2026-11-10T07:04:43Z kafka down 60s: outbox pending 9146, alert ledger-outbox-lag: pending Pending
+2026-11-10T07:05:13Z kafka down 90s: outbox pending 13670, alert ledger-outbox-lag: pending Pending
+2026-11-10T07:05:43Z kafka down 120s: outbox pending 18188, alert ledger-outbox-lag: pending Pending
+2026-11-10T07:06:13Z kafka down 150s: outbox pending 22707, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:06:43Z kafka down 180s: outbox pending 27230, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:07:13Z kafka down 210s: outbox pending 31758, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:07:44Z kafka down 240s: outbox pending 36278, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:08:14Z kafka down 270s: outbox pending 40802, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:08:44Z kafka down 300s: outbox pending 45332, alert ledger-outbox-lag: firing Alerting
+2026-11-10T07:08:44Z RECOVER start kafka
+2026-11-10T07:08:56Z outbox drained 12s after kafka start
+2026-11-10T07:10:12Z k6 finished (exit 0)
+2026-11-10T07:10:12Z outbox drained 0s after k6; nothing PENDING after 0s

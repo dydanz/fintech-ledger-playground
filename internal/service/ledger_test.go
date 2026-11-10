@@ -16,12 +16,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/idempotency"
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 // faultStore fails the InTx call numbered failAt (1-based, counted from

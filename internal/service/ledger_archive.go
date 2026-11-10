@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"auth-api/internal/archive"
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/archive"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // ArchiveStore is what the archiver reads and changes in Postgres (repository.ArchiveRepo).

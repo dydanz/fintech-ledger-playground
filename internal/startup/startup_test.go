@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"auth-api/internal/logger"
-	"auth-api/internal/startup"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/startup"
 )
 
 func TestRetryLogsEachAttemptAndSuccess(t *testing.T) {

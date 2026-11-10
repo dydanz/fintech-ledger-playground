@@ -1,0 +1,8 @@
+2026-11-10T07:10:46Z run 1794294645 fault postgres: 50 writes/s across 100 accounts for 150s (warmup 30s, hold 30s, tail 90s)
+2026-11-10T07:10:48Z writes started
+2026-11-10T07:11:18Z FAULT kill -9 postgres
+2026-11-10T07:11:48Z RECOVER start postgres
+2026-11-10T07:12:02Z postgres accepting queries after 14s
+2026-11-10T07:12:05Z nothing PENDING after 3s
+2026-11-10T07:13:17Z k6 finished (exit 0)
+2026-11-10T07:13:18Z outbox drained 0s after k6; nothing PENDING after 0s

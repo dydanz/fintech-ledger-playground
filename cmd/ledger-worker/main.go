@@ -20,15 +20,15 @@ import (
 	"syscall"
 	"time"
 
-	"auth-api/internal/archive"
-	"auth-api/internal/config"
-	"auth-api/internal/kafka"
-	"auth-api/internal/logger"
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/startup"
-	"auth-api/internal/worker"
+	"fintech-ledger-playground/internal/archive"
+	"fintech-ledger-playground/internal/config"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/startup"
+	"fintech-ledger-playground/internal/worker"
 )
 
 func main() {

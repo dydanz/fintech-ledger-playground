@@ -6,9 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"auth-api/internal/config"
-	"auth-api/internal/logger"
-	"auth-api/internal/token"
+	"fintech-ledger-playground/internal/config"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/token"
 )
 
 const (
