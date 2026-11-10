@@ -430,6 +430,38 @@ func TestStalledPublishIsLoggedAndRetried(t *testing.T) {
 	}
 }
 
+// stuckPub never returns until released, whatever ctx says: a publish that
+// is slow or stuck in the client (spec/Chaos Runbook §6.1).
+type stuckPub struct{ release chan struct{} }
+
+func (s *stuckPub) Publish(context.Context, []kafka.Record) error {
+	<-s.release
+	return errors.New("released")
+}
+
+// outbox.lag is the relay's heartbeat, and the lag alert's input: it keeps
+// coming, with the growing lag, while a publish is stuck.
+func TestLagIsReportedWhilePublishIsStuck(t *testing.T) {
+	e := newEnv(t)
+	e.rawInsert(e.ctx, e.poolExec, "acct-stuck")
+	cfg := e.cfg()
+	cfg.LagEvery = 50 * time.Millisecond
+	pub := &stuckPub{release: make(chan struct{})}
+	ctx, stop := context.WithCancel(e.ctx)
+	done := make(chan struct{})
+	go func() { e.relay(e.repo, pub, cfg).Run(ctx); close(done) }()
+	time.Sleep(500 * time.Millisecond)
+	stop()
+	close(pub.release)
+	<-done
+	if n := strings.Count(e.logs.String(), `"event":"outbox.lag"`); n < 5 {
+		t.Fatalf("%d outbox.lag logs in 500ms at LagEvery=50ms while publish was stuck:\n%s", n, e.logs)
+	}
+	if !strings.Contains(e.logs.String(), `"pending":1`) {
+		t.Fatalf("lag logs don't show the unpublished row:\n%s", e.logs)
+	}
+}
+
 // NOTIFY wakes the relay well before its poll interval, including after a
 // wait has already timed out once.
 func TestNotifyWakesTheRelay(t *testing.T) {

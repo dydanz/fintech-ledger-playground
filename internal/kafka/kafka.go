@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kerr"
@@ -50,6 +51,9 @@ func SplitBrokers(v string) []string {
 
 type Producer struct {
 	cl *kgo.Client
+
+	mu       sync.Mutex
+	inFlight chan struct{} // closed when the last batch's records are all settled; nil before the first
 }
 
 // NewProducer produces to topic with idempotent writes (franz-go's
@@ -71,19 +75,64 @@ func NewProducer(brokers []string, topic string, opts ...kgo.Opt) (*Producer, er
 // one. It returns the first error; on error some records may have been
 // written, so callers must treat the batch as unpublished and retry it
 // (at-least-once, §7.3).
+//
+// Publish returns when ctx ends even if the records are still in flight.
+// franz-go won't fail an idempotent record once a request carrying it has
+// been sent (it can't know whether the broker wrote it), so without this a
+// broker that stops answering blocks the caller until it is back. Abandoned
+// records may still be delivered later, as duplicates. Until they settle,
+// Publish produces nothing new and waits for them instead: an outage costs at
+// most one extra copy of one batch, however often the caller retries.
 func (p *Producer) Publish(ctx context.Context, recs []Record) error {
 	if len(recs) == 0 {
 		return nil
 	}
-	krs := make([]*kgo.Record, len(recs))
-	for i, r := range recs {
+	p.mu.Lock()
+	prev := p.inFlight
+	p.mu.Unlock()
+	if prev != nil {
+		select {
+		case <-prev:
+		case <-ctx.Done():
+			return fmt.Errorf("kafka: an earlier batch is still unacknowledged: %w", ctx.Err())
+		}
+	}
+
+	settled := make(chan struct{})
+	p.mu.Lock()
+	p.inFlight = settled
+	p.mu.Unlock()
+	var (
+		mu    sync.Mutex
+		left  = len(recs)
+		first error
+	)
+	for _, r := range recs {
 		kr := &kgo.Record{Topic: r.Topic, Key: []byte(r.Key), Value: r.Value}
 		for k, v := range r.Headers {
 			kr.Headers = append(kr.Headers, kgo.RecordHeader{Key: k, Value: []byte(v)})
 		}
-		krs[i] = kr
+		// The record's own context is Background: ctx only bounds this call,
+		// not the record's delivery.
+		p.cl.Produce(context.Background(), kr, func(_ *kgo.Record, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && first == nil {
+				first = err
+			}
+			if left--; left == 0 {
+				close(settled)
+			}
+		})
 	}
-	return p.cl.ProduceSync(ctx, krs...).FirstErr()
+	select {
+	case <-settled:
+		mu.Lock()
+		defer mu.Unlock()
+		return first
+	case <-ctx.Done():
+		return fmt.Errorf("kafka: %d records unacknowledged: %w", len(recs), ctx.Err())
+	}
 }
 
 // IsRejected reports whether err is the broker refusing records (a

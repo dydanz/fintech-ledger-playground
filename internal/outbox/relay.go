@@ -50,7 +50,8 @@ type RelayConfig struct {
 	EscalateAfter time.Duration // failing this long turns outbox.publish warn into error
 	// PublishTimeout bounds one batch: franz-go retries delivery
 	// indefinitely by default, so without it an outage blocks silently
-	// instead of being logged and retried.
+	// instead of being logged and retried. kafka.Producer.Publish returns at
+	// this deadline even while the batch is still in flight.
 	PublishTimeout time.Duration
 }
 
@@ -73,18 +74,23 @@ func NewRelay(store Store, pub Publisher, cfg RelayConfig) (*Relay, error) {
 
 // Run relays until ctx ends: it drains on every NOTIFY and every
 // PollInterval, backs off while publishing fails, and logs outbox.lag every
-// LagEvery.
+// LagEvery. The lag is logged from its own goroutine, so a slow or stuck
+// publish can't silence the heartbeat the lag alert reads.
 func (r *Relay) Run(ctx context.Context) error {
 	log := logger.FromContext(ctx)
+	lagCtx, stopLag := context.WithCancel(ctx)
+	lagDone := make(chan struct{})
+	go func() { defer close(lagDone); r.reportLag(lagCtx) }()
 	var listener Listener
 	defer func() {
+		stopLag()
+		<-lagDone
 		if listener != nil {
 			listener.Close()
 		}
 	}()
 	backoff := time.Duration(0)
 	var failingSince time.Time
-	nextLag := r.now()
 
 	for ctx.Err() == nil {
 		if listener == nil { // (re)subscribe; polling covers the gap
@@ -116,11 +122,6 @@ func (r *Relay) Run(ctx context.Context) error {
 			} else {
 				log.WarnContext(ctx, "outbox publish failed, retrying", attrs...)
 			}
-		}
-
-		if !r.now().Before(nextLag) {
-			r.logLag(ctx)
-			nextLag = r.now().Add(r.cfg.LagEvery)
 		}
 
 		wait := r.cfg.PollInterval
@@ -174,6 +175,20 @@ func (r *Relay) Drain(ctx context.Context) (reason string, err error) {
 		}
 		if len(batch) < r.cfg.BatchSize {
 			return "", nil
+		}
+	}
+}
+
+// reportLag logs outbox.lag now and every LagEvery until ctx ends.
+func (r *Relay) reportLag(ctx context.Context) {
+	t := time.NewTicker(r.cfg.LagEvery)
+	defer t.Stop()
+	for {
+		r.logLag(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
 		}
 	}
 }

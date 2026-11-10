@@ -12,6 +12,8 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261013022759-7b6cac30a57a
+	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	golang.org/x/crypto v0.58.0
 )
 
@@ -53,7 +55,6 @@ require (
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	github.com/twmb/franz-go/pkg/kmsg v1.15.0 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect

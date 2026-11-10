@@ -984,7 +984,7 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 
 - **Met:** all four faults behave as specified. Every write was answered (Postgres: after retries with the same key). The database, the balances and the Kafka topic matched what the client was told, and the reconciler was clean afterwards. Takeover took 2.2 s.
 - **Found:**
-  - A Kafka outage blocks the outbox relay in `Publish` despite `OUTBOX_PUBLISH_TIMEOUT`, so `outbox.lag` goes silent and the lag alert fires only on NoData.
+  - A Kafka outage blocked the outbox relay in `Publish` despite `OUTBOX_PUBLISH_TIMEOUT`, so `outbox.lag` went silent and the lag alert fired only on NoData. **Fixed:** `Publish` now returns at its deadline, and the relay reports lag from its own goroutine; the alert now fires on the lag value about 2.5 minutes in.
   - A Redis outage adds about 190 ms to every write.
   - A hung (not dead) worker leader keeps its advisory locks, so no replica takes over.
 
