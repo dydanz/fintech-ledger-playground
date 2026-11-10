@@ -4,7 +4,7 @@
 | :--- | :--- |
 | **Status** | Draft for review |
 | **Date** | 2026-11-05 |
-| **Source** | [BRD](<BRD - Immutable Ledger & Event-Sourced Balance System.md>) |
+| **Source** | [BRD](<2026-11-06 BRD - Immutable Ledger & Event-Sourced Balance System.md>) |
 | **Repo** | `fintech-ledger-playground` (Go module `fintech-ledger-playground`; renamed from `random-learning-loki-kafka` / `auth-api`) |
 | **Audience** | Engineers building and reviewing the ledger service in this repo |
 
@@ -966,7 +966,7 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 - Pass criteria:
   - NFR-1, NFR-2, NFR-5 and NFR-8 targets are met.
   - The reconciler reports clean afterwards.
-- **Implemented in P6.2** (`make load-up`, `make load`; `scripts/load/ledger-mixed.js` and `run.sh`). Results are in `spec/Load Test Results - Immutable Ledger.md`. On a Docker Desktop laptop:
+- **Implemented in P6.2** (`make load-up`, `make load`; `scripts/load/ledger-mixed.js` and `run.sh`). Results are in `spec/2026-11-08 Load Test Results - Immutable Ledger.md`. On a Docker Desktop laptop:
   - **Met:** NFR-5 (100.00%, no `processing_timeout`), NFR-8 (lag p99 980 ms) and the reconciler check (clean full sweep of 1.08 M transactions).
   - **Not confirmed:** NFR-1 and NFR-2. Commits wait on the VM disk's flush, 60–314 ms per device flush under load. With `synchronous_commit=off`, as a diagnostic, the same load gave a steady p99 of 50 ms. Both need a run on server-class storage.
   - **Code bottleneck found and fixed (§7.3):** `NOTIFY` inside every write transaction serialized all commits.
@@ -980,7 +980,7 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 | Stop PG | 503 `ledger_unavailable`; no partial state; the sweeper finishes any PENDING after recovery |
 | Kill `ledger-worker` mid-batch | A new leader takes over within 10 s |
 
-**Implemented in P6.3** (`make chaos FAULT=redis|kafka|postgres|worker`; `scripts/chaos/run.sh`). The runbook and recorded results are in `spec/Chaos Runbook - Immutable Ledger.md`.
+**Implemented in P6.3** (`make chaos FAULT=redis|kafka|postgres|worker`; `scripts/chaos/run.sh`). The runbook and recorded results are in `spec/2026-11-09 Chaos Runbook - Immutable Ledger.md`.
 
 - **Met:** all four faults behave as specified. Every write was answered (Postgres: after retries with the same key). The database, the balances and the Kafka topic matched what the client was told, and the reconciler was clean afterwards. Takeover took 2.2 s.
 - **Found:**
@@ -994,7 +994,7 @@ All tests run with `-race`. Every denied, failure and partial path has a log ass
 
 Each phase is one `feat/ledger-<phase>` branch from a freshly pulled default branch, with one PR, per `.claude/rules/git-workflow.md`.
 
-The PR-level breakdown (seven phases P0–P6, one GitHub issue each, with stacked PRs) is in the [Development Plan](<Development Plan - Immutable Ledger & Event-Sourced Balance System.md>). Where the two differ, the plan is current.
+The PR-level breakdown (seven phases P0–P6, one GitHub issue each, with stacked PRs) is in the [Development Plan](<2026-11-06 Development Plan - Immutable Ledger & Event-Sourced Balance System.md>). Where the two differ, the plan is current.
 
 | Phase | Branch | Deliverables | Exit criteria |
 | :--- | :--- | :--- | :--- |

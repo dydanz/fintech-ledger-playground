@@ -1,6 +1,6 @@
 # Operations Guide
 
-How to run, observe, migrate and test the stack locally. API details are in the [Auth API Reference](<Auth API Reference.md>) and the [Ledger API Reference](<Ledger API Reference.md>).
+How to run, observe, migrate and test the stack locally. API details are in the [Auth API Reference](<2026-11-10 Auth API Reference.md>) and the [Ledger API Reference](<2026-11-10 Ledger API Reference.md>).
 
 ## 1. Services
 
@@ -108,7 +108,7 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 - **Database:** `pgtest.New(t)` (`internal/testutil/pgtest`) creates a throwaway database per test, applies every migration and drops it afterwards. The role needs `CREATEDB`, which the compose `auth` role has.
 - **Configuration:** `TEST_DATABASE_URL`, `TEST_KAFKA_BROKERS` and `TEST_S3_*` default to the compose services. Tests are skipped when `TEST_DATABASE_URL` is unset.
 
-**Load tests** (TRD §13.4). The results are in [Load Test Results](<Load Test Results - Immutable Ledger.md>).
+**Load tests** (TRD §13.4). The results are in [Load Test Results](<2026-11-08 Load Test Results - Immutable Ledger.md>).
 - **Isolation:** use a throwaway compose project (`COMPOSE_PROJECT_NAME=…`) to keep the load data out of your stack.
 - **`make load-up`:** `make up` with the fraud thresholds raised, so the run measures writes rather than freezes, and with production-like Postgres memory and WAL settings.
 - **Profiles:**
@@ -118,7 +118,7 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 - **What it runs:** `scripts/load/ledger-mixed.js` in k6. It samples the outbox lag, then reports transaction outcomes, `processing_timeout`s, server-side write latency from Loki, and a full reconciler sweep.
 - **Results:** k6 exits 99 when an NFR threshold fails, and results go to `load-results/<run>/`. A passing example is in [`examples/load/`](../examples/load/).
 
-**Chaos drills** (TRD §13.5). The procedure and the recorded results are in the [Chaos Runbook](<Chaos Runbook - Immutable Ledger.md>).
+**Chaos drills** (TRD §13.5). The procedure and the recorded results are in the [Chaos Runbook](<2026-11-09 Chaos Runbook - Immutable Ledger.md>).
 
 ```bash
 COMPOSE_PROJECT_NAME=chaos make load-up

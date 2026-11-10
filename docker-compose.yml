@@ -223,7 +223,7 @@ services:
     # Postgres's stock memory and WAL settings by default. `make load-up` raises
     # them to production-like values: with the stock 128MB / 1GB, a 30-minute
     # 500 TPS run checkpoints every minute and backends write their own dirty
-    # pages (spec/Load Test Results - Immutable Ledger.md).
+    # pages (spec/2026-11-08 Load Test Results - Immutable Ledger.md).
     command:
       - postgres
       - -c
