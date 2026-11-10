@@ -84,6 +84,19 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (User, error) {
 	return u, err
 }
 
+// UpdatePasswordHash replaces the user's bcrypt hash.
+func (r *UserRepo) UpdatePasswordHash(ctx context.Context, id, hash string) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, id, hash)
+	if err != nil {
+		return fmt.Errorf("update password hash: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *UserRepo) UpdateProfile(ctx context.Context, id string, p ProfileUpdate) (User, error) {
 	u, err := scanUser(r.db.QueryRow(ctx,
 		`UPDATE users

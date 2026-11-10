@@ -39,6 +39,19 @@ func (r *TokenHistoryRepo) Insert(ctx context.Context, rec TokenRecord) error {
 	return nil
 }
 
+// RevokeAllForUser stamps revoked_at on every open record of userID that
+// hasn't expired yet (expired tokens keep revoked_at NULL, see README). It
+// returns how many records it stamped.
+func (r *TokenHistoryRepo) RevokeAllForUser(ctx context.Context, userID string) (int64, error) {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE auth_token_history SET revoked_at = now()
+		  WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("revoke all token history: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // Revoke stamps revoked_at on the record for tokenHash. It reports whether
 // a not-yet-revoked record was found.
 func (r *TokenHistoryRepo) Revoke(ctx context.Context, tokenHash string) (bool, error) {

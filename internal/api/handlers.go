@@ -122,6 +122,26 @@ func (h *Handlers) UpdateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, toUserResponse(u))
 }
 
+type passwordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+// PUT /api/v1/users/password. Every session of the user ends, including
+// this one: the client logs in again with the new password.
+func (h *Handlers) ChangePassword(c *gin.Context) {
+	var req passwordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortError(c, http.StatusBadRequest, "invalid_request", "current_password and new_password are required")
+		return
+	}
+	if err := h.auth.ChangePassword(c.Request.Context(), c.GetString(ctxUserID), req.CurrentPassword, req.NewPassword); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // fail maps domain errors to HTTP responses. Unexpected errors are attached
 // to the Gin context so the access log records them, and are never echoed.
 func (h *Handlers) fail(c *gin.Context, err error) {
@@ -131,6 +151,11 @@ func (h *Handlers) fail(c *gin.Context, err error) {
 		abortError(c, http.StatusBadRequest, "invalid_request", ve.Msg)
 	case errors.Is(err, service.ErrInvalidCredentials):
 		abortError(c, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+	case errors.Is(err, service.ErrWrongPassword):
+		abortError(c, http.StatusForbidden, "invalid_credentials", "current password is incorrect")
+	case errors.Is(err, service.ErrSessionStore):
+		_ = c.Error(err)
+		abortError(c, http.StatusServiceUnavailable, "session_store_unavailable", "sessions temporarily unavailable; the password was not changed")
 	case errors.Is(err, service.ErrEmailTaken):
 		abortError(c, http.StatusConflict, "email_taken", "email is already registered")
 	case errors.Is(err, repository.ErrNotFound):

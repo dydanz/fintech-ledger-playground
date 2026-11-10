@@ -31,9 +31,10 @@ import (
 // --- in-memory fakes for the PostgreSQL repositories ---
 
 type fakeUsers struct {
-	mu   sync.Mutex
-	byID map[string]*repository.User
-	seq  int
+	mu          sync.Mutex
+	byID        map[string]*repository.User
+	seq         int
+	failPwWrite error // UpdatePasswordHash returns it when set
 }
 
 func (f *fakeUsers) Create(_ context.Context, email, hash string) (repository.User, error) {
@@ -88,14 +89,30 @@ func (f *fakeUsers) UpdateProfile(_ context.Context, id string, p repository.Pro
 	return *u, nil
 }
 
+func (f *fakeUsers) UpdatePasswordHash(_ context.Context, id, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failPwWrite != nil {
+		return f.failPwWrite
+	}
+	u, ok := f.byID[id]
+	if !ok {
+		return repository.ErrNotFound
+	}
+	u.PasswordHash = hash
+	u.UpdatedAt = time.Now()
+	return nil
+}
+
 type historyRow struct {
 	rec       repository.TokenRecord
 	revokedAt *time.Time
 }
 
 type fakeHistory struct {
-	mu   sync.Mutex
-	rows []*historyRow
+	mu            sync.Mutex
+	rows          []*historyRow
+	failRevokeAll error // RevokeAllForUser returns it when set
 }
 
 func (f *fakeHistory) Insert(_ context.Context, rec repository.TokenRecord) error {
@@ -118,12 +135,30 @@ func (f *fakeHistory) Revoke(_ context.Context, hash string) (bool, error) {
 	return false, nil
 }
 
+func (f *fakeHistory) RevokeAllForUser(_ context.Context, userID string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failRevokeAll != nil {
+		return 0, f.failRevokeAll
+	}
+	var n int64
+	for _, r := range f.rows {
+		if r.rec.UserID == userID && r.revokedAt == nil && r.rec.ExpiresAt.After(time.Now()) {
+			now := time.Now()
+			r.revokedAt = &now
+			n++
+		}
+	}
+	return n, nil
+}
+
 // --- harness ---
 
 type harness struct {
 	t       *testing.T
 	srv     http.Handler
 	mr      *miniredis.Miniredis
+	users   *fakeUsers
 	history *fakeHistory
 	logs    *bytes.Buffer
 }
@@ -156,7 +191,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, srv: r, mr: mr, history: history, logs: logs}
+	return &harness{t: t, srv: r, mr: mr, users: users, history: history, logs: logs}
 }
 
 func (h *harness) do(method, path, bearer string, body any) *httptest.ResponseRecorder {

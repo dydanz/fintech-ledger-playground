@@ -192,17 +192,21 @@ The thresholds above (30 s, 5 s) are starting values for the builder to tune aga
 
 ### 7.1 auth-api: password change (new)
 
-- **Route:** `PUT /api/v1/users/password`, Bearer, with body `{"current_password","new_password"}`. It answers `204`, or `401` for a wrong current password, `400 invalid_input` (8–72 bytes, as at registration) or `503`.
+- **Route:** `PUT /api/v1/users/password`, Bearer, with body `{"current_password","new_password"}`. It answers `204`, or `403 invalid_credentials` for a wrong current password, `400 invalid_request` (8–72 bytes, as at registration) or `503 session_store_unavailable`. *Changed in C1.1:* `403` rather than `401`, because the caller's token is valid and the console treats any `401` as "session ended"; `invalid_request` is auth-api's existing envelope code (the log reason stays `invalid_input`).
 - **Steps:**
-  1. Verify the current password with bcrypt.
-  2. Update the hash.
-  3. End **every** session of the user.
+  1. Verify the current password with bcrypt, and validate the new one.
+  2. Compute the new hash.
+  3. End **every** session of the user. If this fails, the password stays unchanged.
+  4. Write the hash.
+  5. Stamp the audit rows.
+
+  *Changed in C1.1:* the sessions end before the hash is written, so a Redis failure can't leave a changed password with old sessions alive.
 - **Session index:** ending every session needs a per-user index. A Redis set `session:user:<user_id>` of token hashes is added to on login and removed from on logout, with a TTL kept at least as long as the newest session's. Ending them all then means:
   - deleting each `session:auth:<hash>` and the set;
   - setting `revoked_at` on the user's open `auth_token_history` rows.
 - **Logging:** a new catalog event `auth.password_change` (C1):
   - success=info, denied=warn, failure=error;
-  - reasons `bad_password`, `invalid_input`, `pg_error`, `session_store_error`;
+  - reasons `bad_password`, `invalid_input`, `pg_error`, `session_store_error`, `hash_failed`, and partial `audit_revoke_failed` (added in C1.1);
   - an error-level panel in the auth-api dashboard;
   - tests for each path.
 
