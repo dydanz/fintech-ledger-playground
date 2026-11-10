@@ -242,6 +242,8 @@ Each action sends a fresh `Idempotency-Key` per click. Demo actions are on when 
 
 ## 8. Delivery (one PR each)
 
+The [Development Plan](<2026-11-10 Development Plan - Web Console.md>) breaks this into four phases (C1–C4) and nine PRs, with tests and acceptance per PR. Where the two differ, the plan is current.
+
 1. `feat/auth-password-change`: §7.1.
 2. `feat/ledger-ops-read-routes`: §7.2.
 3. `feat/console-skeleton`: `ledger-console` service, SPA scaffold and Docker build, the auth pages and My account with demo actions (§5.4), and `make smoke-console`.
