@@ -1,0 +1,55 @@
+== run 1794294645, fault postgres, from 2026-11-10T07:10:46Z, k6 exit 0
+
+== timeline
+2026-11-10T07:10:46Z run 1794294645 fault postgres: 50 writes/s across 100 accounts for 150s (warmup 30s, hold 30s, tail 90s)
+2026-11-10T07:10:48Z writes started
+2026-11-10T07:11:18Z FAULT kill -9 postgres
+2026-11-10T07:11:48Z RECOVER start postgres
+2026-11-10T07:12:02Z postgres accepting queries after 14s
+2026-11-10T07:12:05Z nothing PENDING after 3s
+2026-11-10T07:13:17Z k6 finished (exit 0)
+2026-11-10T07:13:18Z outbox drained 0s after k6; nothing PENDING after 0s
+
+== client vs database vs Kafka
+requests 6511: 6511 answered, 0 gave up, 1097 needed a retry (max tries 44, max time to answer 44568 ms)
+failed attempts by status: {'503 ledger_unavailable': 1096, '0': 1}
+failed attempts from 2026-11-10T07:11:18.275Z to 2026-11-10T07:12:01.893Z
+final answers by status: {201: 6510, 202: 1}
+PASS  every request answered: 0 gave up after RETRY_FOR
+time to answer before the fault: n 1551  p50 2 ms  p99 12 ms  max 64 ms
+time to answer during the fault: n 13  p50 3 ms  p99 26 ms  max 26 ms
+time to answer after the fault: n 4847  p50 3 ms  p99 43519 ms  max 44568 ms
+PASS  confirmed transactions in Postgres: 6511 confirmed, 0 missing, 0 keys sharing a transaction
+PASS  transaction states match the answers: 0 differ
+PASS  no transactions the client wasn't told about: 0 extra
+PASS  nothing left PENDING, no processing_timeout: 0 pending, 0 processing_timeout
+PASS  balances equal the confirmed amounts: 100 accounts, 0 differ
+PASS  every outbox event on Kafka: 19733 outbox events, 0 missing from the topic, 1 delivered more than once
+PASS  postgres: failures are 503 ledger_unavailable: 1097 failed attempts, 0 of another kind
+
+== host stalls (gaps over 5 s between the 1 s samples: the Mac slept or the VM froze)
+none
+
+== samples (outbox pending, oldest unpublished ms, PENDING/PROCESSING): peak, and the first and last 'down'
+peak pending 2358 (at 07:12:02), peak lag 44441 ms, peak in-flight 6, postgres unreachable from 07:11:18 to 07:12:01
+
+== log events since the run started (service event outcome reason: count)
+ledger-api dependency.call failure timeout: 2
+ledger-api http.request - 503: 10612
+ledger-api ledger.credit failure pg_error: 4155
+ledger-api ledger.debit failure pg_error: 6456
+ledger-worker app.leader failure connection_lost: 7
+ledger-worker app.leader failure pg_error: 56
+ledger-worker app.leader success -: 14
+ledger-worker ledger.archive success -: 1
+ledger-worker ledger.partition success -: 1
+ledger-worker ledger.reconcile success -: 2
+ledger-worker ledger.recover success stuck_pending: 1
+ledger-worker outbox.lag success -: 5
+ledger-worker outbox.publish failure pg_error: 2
+
+== fraud-engine consumer lag after the run
+fraud-engine lag 0
+
+== reconciler full sweep after the run
+PASS  mode=full outcome=success transactions=100725 ledgers=1310 accounts=1310 mismatches=0 duration_ms=3448.317

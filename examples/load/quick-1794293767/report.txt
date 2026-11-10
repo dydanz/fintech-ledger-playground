@@ -1,0 +1,27 @@
+== run 1794293767, profile quick, 1000 + 10 hot accounts, from 2026-11-10T06:56:08Z, 143s, k6 exit 0
+
+== NFR-8 outbox lag, 236 samples every 0.5 s (ms)
+p50 12  p99 163  max 720
+
+== Transactions created during the run (type, status, failure_reason, count)
+CREDIT SETTLED - 22073
+CREDIT VOIDED - 1191
+DEBIT SETTLED - 35642
+DEBIT VOIDED - 1958
+VOID SETTLED - 3149
+
+== NFR-5 server side: FAILED processing_timeout, and still PENDING/PROCESSING after the sweeper
+processing_timeout 0  still_pending 0
+
+== NFR-2 server side: ledger-api write latency from the access log (ms, all phases)
+p50 2.1
+p99 75.8
+
+== Fraud decisions during the run
+fraud.decision events: 0
+
+== Reconciler during the run (incremental): outcome counts
+   3 success
+
+== Reconciler full sweep after the run
+level=info mode=full outcome=success transactions=64013 ledgers=1010 accounts=1010 mismatches=0 duration_ms=1579.044
