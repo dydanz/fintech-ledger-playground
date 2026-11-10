@@ -79,7 +79,7 @@ ledger-console (new Go service: serves the built SPA + /console/api/*)
 
 ## 5. Screens
 
-The reviewed mockup, [`mockups/console-monitor-v1.html`](mockups/2026-11-10%20console-monitor-v1.html) (open it in a browser), is the baseline: Monitor and Transaction detail, with numbers from the chaos drills. Changes from it are noted.
+The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026-11-10%20console-monitor-v1.html) (open it in a browser), is the baseline: Monitor and Transaction detail, with numbers from the chaos drills. Changes from it are noted.
 
 ### 5.1 Monitor (`/`)
 
