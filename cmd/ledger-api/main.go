@@ -73,7 +73,8 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 	notifier := outbox.NewNotifier(db, 10*time.Millisecond)
 	go notifier.Run(ctx)
 
-	ledgerSvc, err := service.NewLedgerService(repository.NewLedgerRepo(db, cfg.EventsTopic, notifier), service.LedgerConfig{
+	repo := repository.NewLedgerRepo(db, cfg.EventsTopic, notifier)
+	ledgerSvc, err := service.NewLedgerService(repo, service.LedgerConfig{
 		Currencies:       cfg.Currencies,
 		MaxAmount:        cfg.MaxAmount,
 		ProcessTimeout:   cfg.ProcessTimeout,
@@ -92,6 +93,7 @@ func run(cfg config.LedgerConfig, log *slog.Logger) error {
 	router, err := api.NewLedgerRouter(api.LedgerDeps{
 		Logger:         log,
 		Ledger:         ledgerSvc,
+		Ops:            service.NewOpsReader(repo),
 		Clients:        api.NewClients(cfg.Clients),
 		Sessions:       session.NewRedisStore(rdb),
 		TrustedProxies: cfg.TrustedProxies,
