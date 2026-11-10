@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/fraud"
-	"auth-api/internal/idempotency"
-	"auth-api/internal/kafka"
-	"auth-api/internal/ledger"
-	"auth-api/internal/logger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/fraud"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 const trace = "4bf92f3577b34da6a3ce929d0e0e4736"

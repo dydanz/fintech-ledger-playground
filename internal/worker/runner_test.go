@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/logger"
-	"auth-api/internal/testutil/pgtest"
-	"auth-api/internal/worker"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/worker"
 )
 
 // Two replicas: exactly one runs the job; when it stops, the other takes

@@ -15,7 +15,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"auth-api/internal/startup"
+	"fintech-ledger-playground/internal/startup"
 )
 
 // Record is one message to publish. Key decides the partition: the relay

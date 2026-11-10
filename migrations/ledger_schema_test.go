@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"

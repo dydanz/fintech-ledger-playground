@@ -1,4 +1,4 @@
-# auth-api + immutable ledger
+# fintech-ledger-playground
 
 A Go/Gin playground for reliable money movement, with structured JSON logs shipped to Loki and Grafana. It has four services:
 

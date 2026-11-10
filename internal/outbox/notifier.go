@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"auth-api/internal/logger"
+	"fintech-ledger-playground/internal/logger"
 )
 
 // Execer runs a statement outside any transaction; *pgxpool.Pool is one.

@@ -5,7 +5,7 @@
 | **Status** | Draft for review |
 | **Date** | 2026-11-06 |
 | **Source** | [TRD](<TRD - Immutable Ledger & Event-Sourced Balance System.md>), [BRD](<BRD - Immutable Ledger & Event-Sourced Balance System.md>) |
-| **Repo** | `github.com/dydanz/random-learning-loki-kafka` |
+| **Repo** | `github.com/dydanz/fintech-ledger-playground` (renamed from `random-learning-loki-kafka`) |
 
 This plan breaks TRD §14 into seven phases.
 

@@ -18,11 +18,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/session"
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/session"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 // flakyStore fails the next InTx call(s) chosen by failNth.

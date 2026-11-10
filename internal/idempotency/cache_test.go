@@ -9,7 +9,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/idempotency"
+	"fintech-ledger-playground/internal/idempotency"
 )
 
 func newCache(t *testing.T) (*idempotency.RedisCache, *miniredis.Miniredis) {

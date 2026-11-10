@@ -17,9 +17,9 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"auth-api/internal/archive"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/archive"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 // Integration tests reach the compose S3 gateway (archive-store) here.

@@ -20,12 +20,12 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 
-	"auth-api/internal/api"
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/session"
-	"auth-api/internal/token"
+	"fintech-ledger-playground/internal/api"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/session"
+	"fintech-ledger-playground/internal/token"
 )
 
 // --- in-memory fakes for the PostgreSQL repositories ---

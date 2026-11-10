@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/service"
 )
 
 type Deps struct {

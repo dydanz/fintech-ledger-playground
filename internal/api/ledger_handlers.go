@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/service"
 )
 
 // LedgerHandlers serves ledger-api's internal routes (TRD §6.2).

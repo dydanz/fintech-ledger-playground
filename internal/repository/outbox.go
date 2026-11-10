@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 // OutboxRepo is the relay's view of ledger.outbox (spec/TRD §7.3).

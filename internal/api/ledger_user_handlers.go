@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/service"
 )
 
 // User routes (TRD §6.2). The account always comes from the session's

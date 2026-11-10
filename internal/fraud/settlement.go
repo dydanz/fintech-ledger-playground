@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 // Settlement is a settled credit or debit, read from the event feed.

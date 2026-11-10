@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/archive"
+	"fintech-ledger-playground/internal/archive"
 )
 
 func TestParquetRoundTrip(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 func TestEncode(t *testing.T) {

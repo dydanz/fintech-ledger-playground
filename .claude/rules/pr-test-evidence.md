@@ -34,7 +34,7 @@ Commit `<sha>` · go1.27.3 · `docker compose -p <project>` (Postgres 17, Kafka 
 <details><summary>make test-integration</summary>
 
 ```
-ok  	auth-api/internal/service	20.396s
+ok  	fintech-ledger-playground/internal/service	20.396s
 ...
 ```
 </details>

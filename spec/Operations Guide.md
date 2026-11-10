@@ -6,6 +6,8 @@ How to run, observe, migrate and test the stack locally. API details are in the 
 
 `make up` builds and starts everything with `docker compose`. It then reloads Grafana's alert rules (`scripts/grafana-reload.sh`), because Grafana only reads them at startup.
 
+**Compose project name:** the project is still called `auth-api` (`name:` in `docker-compose.yml`), so the data volumes are `auth-api_pgdata`, `auth-api_kafkadata` and so on. The name was kept on purpose when the project became `fintech-ledger-playground`, because changing it would make Docker start on new, empty volumes. Throwaway runs override it with `COMPOSE_PROJECT_NAME=…`.
+
 | Service | Where | What it does |
 | :--- | :--- | :--- |
 | api (auth-api) | http://localhost:8080 | Registration, login, sessions, profile |

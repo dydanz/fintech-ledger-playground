@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 func acctEvent(version int64, p ledger.Payload) ledger.Event {

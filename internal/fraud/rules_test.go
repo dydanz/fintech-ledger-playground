@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/fraud"
+	"fintech-ledger-playground/internal/fraud"
 )
 
 var t0 = time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)

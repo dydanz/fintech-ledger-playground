@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/service"
 )
 
 type fakePartitionStore struct {

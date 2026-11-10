@@ -17,11 +17,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/config"
-	"auth-api/internal/fraud"
-	"auth-api/internal/kafka"
-	"auth-api/internal/logger"
-	"auth-api/internal/startup"
+	"fintech-ledger-playground/internal/config"
+	"fintech-ledger-playground/internal/fraud"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/startup"
 )
 
 func main() {

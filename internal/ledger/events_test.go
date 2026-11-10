@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"auth-api/internal/ledger"
+	"fintech-ledger-playground/internal/ledger"
 )
 
 func allPayloads() []ledger.Payload {

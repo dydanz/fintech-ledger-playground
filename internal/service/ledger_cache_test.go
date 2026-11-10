@@ -13,9 +13,9 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/idempotency"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 // newCachedEnv is newSvcEnv with the Redis idempotency cache on miniredis.

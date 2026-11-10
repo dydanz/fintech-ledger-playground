@@ -1,4 +1,4 @@
-module auth-api
+module fintech-ledger-playground
 
 go 1.26.0
 

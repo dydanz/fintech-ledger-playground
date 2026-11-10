@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 type Handlers struct {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/token"
+	"fintech-ledger-playground/internal/token"
 )
 
 // login stores an auth-api session for userID, as POST /auth/login does.

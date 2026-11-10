@@ -5,7 +5,7 @@
 | **Status** | Draft for review |
 | **Date** | 2026-11-05 |
 | **Source** | [BRD](<BRD - Immutable Ledger & Event-Sourced Balance System.md>) |
-| **Repo** | `random-learning-loki-kafka` (Go module `auth-api`) |
+| **Repo** | `fintech-ledger-playground` (Go module `fintech-ledger-playground`; renamed from `random-learning-loki-kafka` / `auth-api`) |
 | **Audience** | Engineers building and reviewing the ledger service in this repo |
 
 This TRD turns the BRD into a buildable design for this repo. It reuses the existing stack and conventions: Go/Gin, pgx, go-redis, `slog` JSON logs → Alloy → Loki → Grafana, and the append-only trigger pattern from `auth_token_history`. It adds Kafka, the ledger services and a fraud engine.

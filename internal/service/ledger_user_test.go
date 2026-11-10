@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/service"
 )
 
 // openUser opens an account for a new user and returns (user id, account id).

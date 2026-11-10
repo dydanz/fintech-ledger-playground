@@ -9,9 +9,9 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"auth-api/internal/fraud"
-	"auth-api/internal/ledger"
-	"auth-api/internal/outbox"
+	"fintech-ledger-playground/internal/fraud"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/outbox"
 )
 
 func newEvaluator(t *testing.T) (*fraud.Evaluator, *miniredis.Miniredis) {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"auth-api/internal/kafka"
-	"auth-api/internal/testutil/kafkatest"
+	"fintech-ledger-playground/internal/kafka"
+	"fintech-ledger-playground/internal/testutil/kafkatest"
 )
 
 func TestProduceConsumeRoundTrip(t *testing.T) {

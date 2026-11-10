@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/archive"
+	"fintech-ledger-playground/internal/archive"
 )
 
 // ArchiveRepo is the archiver's access to Postgres (spec/TRD §7.8). Partition

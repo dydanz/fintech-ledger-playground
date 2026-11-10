@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
-	"auth-api/internal/token"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/token"
 )
 
 // TokenTTL is the fixed validity window of an access token.

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/ledger"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 const (

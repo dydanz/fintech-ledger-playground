@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/testutil/pgtest"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/testutil/pgtest"
 )
 
 func partitionJob(t *testing.T, store service.PartitionStore, at time.Time) *service.Partitions {

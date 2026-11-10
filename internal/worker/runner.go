@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"auth-api/internal/logger"
+	"fintech-ledger-playground/internal/logger"
 )
 
 // Job is one periodic task. Run should log its own events (logging rule §4);

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/idempotency"
-	"auth-api/internal/outbox"
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
-	"auth-api/internal/worker"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/outbox"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
+	"fintech-ledger-playground/internal/worker"
 )
 
 func (e *svcEnv) recovery(sweepAfter, maxAge time.Duration) *service.Recovery {

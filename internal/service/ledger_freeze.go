@@ -8,10 +8,10 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"auth-api/internal/idempotency"
-	"auth-api/internal/ledger"
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/idempotency"
+	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // FraudRules are the rule names a freeze may cite (logging rule: `rule` comes

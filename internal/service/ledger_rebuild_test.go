@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"auth-api/internal/repository"
-	"auth-api/internal/service"
+	"fintech-ledger-playground/internal/repository"
+	"fintech-ledger-playground/internal/service"
 )
 
 func (e *svcEnv) rebuild(opts service.RebuildOptions) service.RebuildReport {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"auth-api/internal/logger"
-	"auth-api/internal/repository"
+	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/repository"
 )
 
 // RecoveryStore is what the ledger-worker jobs read and delete.
