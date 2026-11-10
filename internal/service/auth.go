@@ -29,6 +29,11 @@ const (
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrEmailTaken         = repository.ErrEmailTaken
+	// ErrWrongPassword is a wrong current password on a password change. The
+	// caller's token is valid, so it maps to 403, not 401.
+	ErrWrongPassword = errors.New("current password is incorrect")
+	// ErrSessionStore wraps a session store failure the caller can retry.
+	ErrSessionStore = errors.New("session store unavailable")
 )
 
 // ValidationError is returned for bad client input.
@@ -41,16 +46,19 @@ type UserStore interface {
 	GetByEmail(ctx context.Context, email string) (repository.User, error)
 	GetByID(ctx context.Context, id string) (repository.User, error)
 	UpdateProfile(ctx context.Context, id string, p repository.ProfileUpdate) (repository.User, error)
+	UpdatePasswordHash(ctx context.Context, id, hash string) error
 }
 
 type TokenHistory interface {
 	Insert(ctx context.Context, rec repository.TokenRecord) error
 	Revoke(ctx context.Context, tokenHash string) (bool, error)
+	RevokeAllForUser(ctx context.Context, userID string) (int64, error)
 }
 
 type SessionStore interface {
 	Create(ctx context.Context, tokenHash, userID string, ttl time.Duration) error
 	Delete(ctx context.Context, tokenHash string) (bool, error)
+	RevokeAll(ctx context.Context, userID string) (int, error)
 }
 
 type AuthService struct {
@@ -200,6 +208,63 @@ func (s *AuthService) Logout(ctx context.Context, tokenHash, userID string) erro
 	default:
 		log.InfoContext(ctx, "logout succeeded", "user_id", userID)
 	}
+	return nil
+}
+
+// ChangePassword replaces the user's password and ends every session of the
+// user, including the one making the request, so the caller logs in again.
+//
+// Order matters. The new hash is computed first (bcrypt is the slow step),
+// then the sessions are ended, then the hash is written. If the sessions
+// can't be ended, the password stays as it was: a new password with the old
+// sessions still alive would defeat the point. If the hash write fails after
+// that, the user is logged out with the old password still valid, which is
+// safe. Sessions created before the per-user index existed aren't in it and
+// expire on their own within TokenTTL.
+//
+// It emits one auth.password_change event (C1).
+func (s *AuthService) ChangePassword(ctx context.Context, userID, current, next string) error {
+	log := logger.FromContext(ctx)
+	const event = "auth.password_change"
+
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		log.ErrorContext(ctx, "password change failed", "event", event, "outcome", "failure", "reason", "pg_error", "error", err)
+		return err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(current)); err != nil {
+		log.WarnContext(ctx, "password change refused", "event", event, "outcome", "denied", "reason", "bad_password")
+		return ErrWrongPassword
+	}
+	if err := validatePassword(next); err != nil {
+		log.WarnContext(ctx, "password change refused", "event", event, "outcome", "denied", "reason", "invalid_input")
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(next), s.bcryptCost)
+	if err != nil {
+		log.ErrorContext(ctx, "password change failed", "event", event, "outcome", "failure", "reason", "hash_failed", "error", err)
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	ended, err := s.sessions.RevokeAll(ctx, userID)
+	if err != nil {
+		log.ErrorContext(ctx, "password change failed", "event", event, "outcome", "failure", "reason", "session_store_error", "error", err)
+		return errors.Join(ErrSessionStore, err)
+	}
+	if err := s.users.UpdatePasswordHash(ctx, userID, string(hash)); err != nil {
+		log.ErrorContext(ctx, "password change failed", "event", event, "outcome", "failure", "reason", "pg_error", "error", err,
+			"sessions_ended", ended)
+		return err
+	}
+
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := s.history.RevokeAllForUser(cctx, userID); err != nil {
+		log.ErrorContext(ctx, "password changed but audit revoke failed", "event", event, "outcome", "partial",
+			"reason", "audit_revoke_failed", "error", err, "sessions_ended", ended)
+		return nil
+	}
+	log.InfoContext(ctx, "password changed", "event", event, "outcome", "success", "sessions_ended", ended)
 	return nil
 }
 

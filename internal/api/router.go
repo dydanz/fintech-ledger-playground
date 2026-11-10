@@ -39,6 +39,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		users := v1.Group("/users", requireAuth)
 		users.GET("/profile", h.GetProfile)
 		users.PUT("/profile", h.UpdateProfile)
+		users.PUT("/password", h.ChangePassword)
 	}
 
 	return r, nil

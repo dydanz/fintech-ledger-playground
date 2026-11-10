@@ -170,6 +170,38 @@
           "expr": "{service=\"auth-api\"}"
         }
       ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Password changes by outcome and reason (auth.password_change)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"auth-api\"} | json | event=\"auth.password_change\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }

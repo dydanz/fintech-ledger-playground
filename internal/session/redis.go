@@ -13,6 +13,12 @@ import (
 // KeyPrefix namespaces session keys: session:auth:<sha256(token)>.
 const KeyPrefix = "session:auth:"
 
+// UserIndexPrefix namespaces the per-user index: session:user:<user_id> is
+// the set of that user's token hashes, so all of them can be ended at once
+// (RevokeAll). It expires with the user's newest session; members of
+// sessions that expired earlier are stale and skipped.
+const UserIndexPrefix = "session:user:"
+
 var ErrNotFound = errors.New("session not found")
 
 type Session struct {
@@ -32,6 +38,10 @@ func key(tokenHash string) string { return KeyPrefix + tokenHash }
 
 // Create stores an active session that expires after ttl. It refuses to
 // overwrite an existing key.
+//
+// The session is also added to its user's index. If that fails, the session
+// is deleted again: a session missing from the index would survive
+// RevokeAll, for example after a password change.
 func (s *RedisStore) Create(ctx context.Context, tokenHash, userID string, ttl time.Duration) error {
 	ok, err := s.rdb.SetNX(ctx, key(tokenHash), userID, ttl).Result()
 	if err != nil {
@@ -39,6 +49,12 @@ func (s *RedisStore) Create(ctx context.Context, tokenHash, userID string, ttl t
 	}
 	if !ok {
 		return errors.New("redis setnx: session key already exists")
+	}
+	if err := indexScript.Run(ctx, s.rdb, []string{UserIndexPrefix + userID}, tokenHash, ttl.Milliseconds()).Err(); err != nil {
+		if _, derr := s.rdb.Del(context.WithoutCancel(ctx), key(tokenHash)).Result(); derr != nil {
+			err = errors.Join(err, fmt.Errorf("undo session: %w", derr))
+		}
+		return fmt.Errorf("redis index session: %w", err)
 	}
 	return nil
 }
@@ -70,11 +86,52 @@ func (s *RedisStore) Get(ctx context.Context, tokenHash string) (Session, error)
 	return Session{UserID: get.Val(), ExpiresAt: time.Now().Add(ttl)}, nil
 }
 
-// Delete removes the session. It reports whether a key was removed.
+// Delete removes the session and its entry in the user's index. It reports
+// whether a session was removed.
 func (s *RedisStore) Delete(ctx context.Context, tokenHash string) (bool, error) {
-	n, err := s.rdb.Del(ctx, key(tokenHash)).Result()
+	n, err := deleteScript.Run(ctx, s.rdb, []string{key(tokenHash)}, UserIndexPrefix, tokenHash).Int64()
 	if err != nil {
 		return false, fmt.Errorf("redis del: %w", err)
 	}
 	return n > 0, nil
 }
+
+// RevokeAll ends every session of userID and drops its index. It returns
+// how many live sessions it ended.
+func (s *RedisStore) RevokeAll(ctx context.Context, userID string) (int, error) {
+	n, err := revokeAllScript.Run(ctx, s.rdb, []string{UserIndexPrefix + userID}, KeyPrefix).Int()
+	if err != nil {
+		return 0, fmt.Errorf("redis revoke all: %w", err)
+	}
+	return n, nil
+}
+
+// The scripts run atomically. The index and session keys they derive from
+// arguments aren't declared in KEYS, so they assume a single Redis node, as
+// the rest of this store does.
+var (
+	// KEYS[1] index; ARGV[1] token hash, ARGV[2] session TTL in ms. The
+	// index lives at least as long as its newest session.
+	indexScript = redis.NewScript(`
+redis.call('SADD', KEYS[1], ARGV[1])
+if redis.call('PTTL', KEYS[1]) < tonumber(ARGV[2]) then
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 1`)
+
+	// KEYS[1] session key; ARGV[1] index prefix, ARGV[2] token hash.
+	deleteScript = redis.NewScript(`
+local uid = redis.call('GET', KEYS[1])
+local n = redis.call('DEL', KEYS[1])
+if uid then redis.call('SREM', ARGV[1] .. uid, ARGV[2]) end
+return n`)
+
+	// KEYS[1] index; ARGV[1] session key prefix.
+	revokeAllScript = redis.NewScript(`
+local n = 0
+for _, h in ipairs(redis.call('SMEMBERS', KEYS[1])) do
+  n = n + redis.call('DEL', ARGV[1] .. h)
+end
+redis.call('DEL', KEYS[1])
+return n`)
+)

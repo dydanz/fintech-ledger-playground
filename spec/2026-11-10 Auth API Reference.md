@@ -11,6 +11,7 @@ auth-api is a Go/Gin authentication service with Redis-backed sessions and a Pos
 | POST | `/api/v1/auth/logout` | Bearer | – | `204` |
 | GET | `/api/v1/users/profile` | Bearer | – | `200` user |
 | PUT | `/api/v1/users/profile` | Bearer | `{"full_name"?, "bio"?}` | `200` user |
+| PUT | `/api/v1/users/password` | Bearer | `{"current_password","new_password"}` | `204`, and **every session of the user ends**, this one included. Errors: `403 invalid_credentials` (wrong current password; the token is valid, so not `401`), `400 invalid_request` (new password not 8–72 bytes), `503 session_store_unavailable` (password unchanged) |
 | GET | `/healthz`, `/readyz` | – | – | liveness / dependency readiness |
 
 Errors are always `{"error":{"code","message","request_id"}}`.
@@ -40,6 +41,15 @@ A trigger enforces the append-only contract: `DELETE` and `TRUNCATE` are refused
   - If that audit update fails, the token is already dead, so the client still gets `204`.
   - The failure is logged at `error` level for reconciliation (`session deleted but audit revoke failed`, with `token_hash`).
 - **Natural expiry:** tokens that expire naturally keep `revoked_at = NULL`. Use `expires_at` to tell them apart.
+
+**Password change and the session index.** Each session is also recorded in a per-user Redis set, `session:user:<user_id>`. The set expires with the user's newest session; `Delete` (logout) removes a session from it. A password change ends every session in the set at once, so a stolen session doesn't outlive the change. The steps, in order:
+1. Verify the current password, and validate the new one.
+2. Compute the new hash.
+3. End every session. If this fails, the password is unchanged (`503`).
+4. Write the hash. If this fails, the user is logged out but the old password still works, which is safe.
+5. Stamp `revoked_at` on the user's open audit rows. If this fails, the change still stands, and the gap is logged as `auth.password_change` `partial`.
+
+Logins that wrote their session without being indexed (before this was added) aren't in the set; they expire on their own within the hour.
 
 **Other hardening.**
 - bcrypt, cost 12 by default. Passwords must be 8–72 bytes.
