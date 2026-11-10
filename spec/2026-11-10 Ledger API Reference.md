@@ -1,6 +1,6 @@
 # Ledger API Reference
 
-ledger-api serves the immutable, event-sourced balance ledger. The design is in the [TRD](<TRD - Immutable Ledger & Event-Sourced Balance System.md>).
+ledger-api serves the immutable, event-sourced balance ledger. The design is in the [TRD](<2026-11-06 TRD - Immutable Ledger & Event-Sourced Balance System.md>).
 
 Amounts are integers in the currency's minor unit (IDR has none).
 
@@ -51,7 +51,7 @@ End users call these with the `access_token` from auth-api's `/api/v1/auth/login
 
 ## Configuration (TRD §12.2)
 
-ledger-api also reads, as auth-api does ([Auth API Reference](<Auth API Reference.md>)):
+ledger-api also reads, as auth-api does ([Auth API Reference](<2026-11-10 Auth API Reference.md>)):
 - `DATABASE_URL`;
 - `REDIS_*`: auth-api's session store, for the user routes;
 - `LOG_LEVEL`;

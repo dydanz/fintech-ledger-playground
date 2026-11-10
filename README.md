@@ -53,12 +53,12 @@ service ─► ledger-api ─► Postgres: events + journal + outbox, in one tra
 
 | Topic | Document |
 | :--- | :--- |
-| Auth routes, token design, auth config | [Auth API Reference](<spec/Auth API Reference.md>) |
-| Ledger routes, idempotency, ledger config | [Ledger API Reference](<spec/Ledger API Reference.md>) |
-| Services, worker jobs, logging, migrations, tests | [Operations Guide](<spec/Operations Guide.md>) |
-| Design and requirements | [TRD](<spec/TRD - Immutable Ledger & Event-Sourced Balance System.md>), [BRD](<spec/BRD - Immutable Ledger & Event-Sourced Balance System.md>), [Development Plan](<spec/Development Plan - Immutable Ledger & Event-Sourced Balance System.md>) |
-| Load test results (§13.4) | [Load Test Results](<spec/Load Test Results - Immutable Ledger.md>) |
-| Chaos drills and findings (§13.5) | [Chaos Runbook](<spec/Chaos Runbook - Immutable Ledger.md>) |
+| Auth routes, token design, auth config | [Auth API Reference](<spec/2026-11-10 Auth API Reference.md>) |
+| Ledger routes, idempotency, ledger config | [Ledger API Reference](<spec/2026-11-10 Ledger API Reference.md>) |
+| Services, worker jobs, logging, migrations, tests | [Operations Guide](<spec/2026-11-10 Operations Guide.md>) |
+| Design and requirements | [TRD](<spec/2026-11-06 TRD - Immutable Ledger & Event-Sourced Balance System.md>), [BRD](<spec/2026-11-06 BRD - Immutable Ledger & Event-Sourced Balance System.md>), [Development Plan](<spec/2026-11-06 Development Plan - Immutable Ledger & Event-Sourced Balance System.md>) |
+| Load test results (§13.4) | [Load Test Results](<spec/2026-11-08 Load Test Results - Immutable Ledger.md>) |
+| Chaos drills and findings (§13.5) | [Chaos Runbook](<spec/2026-11-09 Chaos Runbook - Immutable Ledger.md>) |
 | Example passing runs | [`examples/`](examples/) |
 
 ## Layout
