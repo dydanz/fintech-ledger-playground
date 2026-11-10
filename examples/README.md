@@ -32,7 +32,7 @@ The quick profile is the TRD §13.4 shape shortened to about 2 minutes, plus set
 - `summary.json`: k6's `--summary-export`;
 - `lag.txt`: the outbox lag samples.
 
-The full 30-minute profile is written up in [`spec/Load Test Results - Immutable Ledger.md`](<../spec/Load Test Results - Immutable Ledger.md>).
+The full 30-minute profile is written up in [`spec/2026-11-08 Load Test Results - Immutable Ledger.md`](<../spec/2026-11-08 Load Test Results - Immutable Ledger.md>).
 
 ## Chaos drill: stop Kafka for 5 minutes
 
@@ -66,4 +66,4 @@ Before #39, the same drill fired the alert only on a missing heartbeat, after 4.
 - `stalls.txt`: host stalls (none);
 - `k6.txt` and `summary.json`: k6's output.
 
-The raw comparison inputs are left out for size: about 21 MB per run in `k6-log.json`, `tx.txt`, `balances.txt`, `outbox.txt` and `kafka.txt`. The procedure and every recorded drill are in [`spec/Chaos Runbook - Immutable Ledger.md`](<../spec/Chaos Runbook - Immutable Ledger.md>).
+The raw comparison inputs are left out for size: about 21 MB per run in `k6-log.json`, `tx.txt`, `balances.txt`, `outbox.txt` and `kafka.txt`. The procedure and every recorded drill are in [`spec/2026-11-09 Chaos Runbook - Immutable Ledger.md`](<../spec/2026-11-09 Chaos Runbook - Immutable Ledger.md>).

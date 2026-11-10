@@ -1,6 +1,6 @@
 # Auth API Reference
 
-auth-api is a Go/Gin authentication service with Redis-backed sessions and a PostgreSQL audit trail. ledger-api's user routes accept the tokens it issues ([Ledger API Reference](<Ledger API Reference.md>)).
+auth-api is a Go/Gin authentication service with Redis-backed sessions and a PostgreSQL audit trail. ledger-api's user routes accept the tokens it issues ([Ledger API Reference](<2026-11-10 Ledger API Reference.md>)).
 
 ## Routes
 
