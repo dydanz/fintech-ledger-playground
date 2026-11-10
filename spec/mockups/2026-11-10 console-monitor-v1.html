@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup: Ledger Trust Monitor (v1)</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e5e7eb;
+          --ok:#15803d; --okbg:#e8f5ec; --warn:#b45309; --warnbg:#fdf3e2; --bad:#b91c1c; --badbg:#fdecec; --info:#1d4ed8; --infobg:#e8effd; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  .note { background:#fffbe6; border-bottom:1px solid #f0e2a0; padding:8px 24px; font-size:13px; }
+  header { display:flex; align-items:center; gap:24px; padding:12px 24px; background:var(--card); border-bottom:1px solid var(--line); }
+  header b { font-size:16px; } header nav a { color:var(--muted); margin-right:16px; text-decoration:none; } header nav a.on { color:var(--ink); font-weight:600; border-bottom:2px solid var(--ink); padding-bottom:12px; }
+  main { padding:20px 24px; max-width:1240px; margin:0 auto; }
+  h2 { margin:28px 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .screen-title { font-size:20px; font-weight:650; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  .tiles { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .tile .k { color:var(--muted); font-size:12px; } .tile .v { font-size:22px; font-weight:650; margin-top:2px; } .tile .s { font-size:12px; margin-top:2px; }
+  .good { color:var(--ok); } .warnc { color:var(--warn); }
+  .banner { margin-top:14px; border-radius:10px; padding:12px 14px; background:var(--warnbg); border:1px solid #f3d29b; display:flex; gap:12px; align-items:flex-start; }
+  .banner.resolved { background:var(--okbg); border-color:#b7e1c3; }
+  .grid { display:grid; grid-template-columns: 1.6fr 1fr; gap:16px; margin-top:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h3 { margin:0 0 10px; font-size:15px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr.sel td { background:#f1f5ff; }
+  .chip { display:inline-block; border-radius:999px; padding:1px 8px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .c-ok { background:var(--okbg); color:var(--ok); } .c-rec { background:var(--infobg); color:var(--info); }
+  .c-rej { background:var(--badbg); color:var(--bad); } .c-warn { background:var(--warnbg); color:var(--warn); }
+  .filters { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .filters span { border:1px solid var(--line); border-radius:999px; padding:2px 10px; font-size:12px; color:var(--muted); }
+  .filters span.on { border-color:var(--ink); color:var(--ink); font-weight:600; }
+  .bars div { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+  .bars i { display:block; height:10px; border-radius:4px; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size:12px; color:var(--muted); }
+  .timeline { list-style:none; margin:0; padding:0 0 0 18px; border-left:2px solid var(--line); }
+  .timeline li { position:relative; margin:0 0 14px; }
+  .timeline li:before { content:""; position:absolute; left:-25px; top:4px; width:10px; height:10px; border-radius:50%; background:var(--muted); }
+  .timeline li.ok:before { background:var(--ok);} .timeline li.rec:before { background:var(--info);} .timeline li.bad:before { background:var(--bad);} .timeline li.warn:before { background:var(--warn);}
+  .t { font-weight:600; } .when { color:var(--muted); font-size:12px; }
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .divider { margin:36px 0 8px; border-top:2px dashed #cbd5e1; padding-top:8px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+</style>
+</head>
+<body>
+<div class="note"><b>Mockup v1, not real data.</b> The numbers are taken from yesterday's Kafka and Postgres chaos drills, to show what a viewer would see. Screen 1 is the live monitor; screen 2 (below) is one transaction's audit trail.</div>
+
+<header>
+  <b>fintech-ledger-playground</b>
+  <nav><a class="on" href="#">Monitor</a><a href="#">Transactions</a><a href="#">Accounts</a><a href="#">My account</a></nav>
+  <span style="margin-left:auto" class="mono">ops viewer · read only</span>
+</header>
+
+<main>
+  <p class="screen-title">Screen 1: Live monitor</p>
+  <p class="sub">The page a non-technical viewer keeps open during a test. It answers three questions: is money handled correctly right now, what went wrong, and how did the system recover?</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Transactions (last 10 min)</div><div class="v">21,100</div><div class="s">50 / s</div></div>
+    <div class="tile"><div class="k">Handled correctly</div><div class="v good">100%</div><div class="s">0 lost · 0 duplicated</div></div>
+    <div class="tile"><div class="k">Needed recovery</div><div class="v">1,098</div><div class="s">all completed ✓</div></div>
+    <div class="tile"><div class="k">Books balanced</div><div class="v good">✓ clean</div><div class="s">reconciler, 40 s ago · 0 mismatches</div></div>
+    <div class="tile"><div class="k">Events to Kafka</div><div class="v warnc">45,332 waiting</div><div class="s">oldest 4 min 50 s</div></div>
+  </div>
+
+  <div class="banner">
+    <div style="font-size:20px">⚠️</div>
+    <div><b>Incident in progress: Kafka unavailable since 10:41:57 (4 min 50 s)</b><br>
+      Payments keep working. Events are saved in the ledger's outbox and will be delivered when Kafka returns. Alert "outbox lag above 5 s" is firing.</div>
+  </div>
+  <div class="banner resolved">
+    <div style="font-size:20px">✅</div>
+    <div><b>Resolved: database restarted, 07:11:18 to 07:12:02 (44 s)</b><br>
+      1,097 payments were refused with "try again" and all succeeded on retry, each exactly once. 1 payment caught mid-way was completed automatically by the recovery job. Nothing was lost or doubled.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Live transactions</h3>
+      <div class="filters"><span class="on">All</span><span>Normal</span><span>Recovered</span><span>Rejected (business rule)</span><span>Reversed</span></div>
+      <table>
+        <tr><th>Time</th><th>Account</th><th>Type</th><th style="text-align:right">Amount</th><th>Outcome</th><th>What happened</th></tr>
+        <tr><td>07:12:05</td><td>…b1f3</td><td>Debit</td><td style="text-align:right">IDR 546</td><td><span class="chip c-ok">Settled</span></td><td>Normal: settled in 3 ms</td></tr>
+        <tr class="sel"><td>07:11:18</td><td>…7f5a</td><td>Credit</td><td style="text-align:right">IDR 180</td><td><span class="chip c-rec">Recovered</span></td><td>Database stopped mid-way; recovery job completed it after restart</td></tr>
+        <tr><td>07:11:40</td><td>…2c09</td><td>Debit</td><td style="text-align:right">IDR 40</td><td><span class="chip c-rec">Retried</span></td><td>Refused during the outage (503); client retried 22×, settled once</td></tr>
+        <tr><td>07:09:12</td><td>…a4d1</td><td>Debit</td><td style="text-align:right">IDR 900</td><td><span class="chip c-rej">Rejected</span></td><td>Insufficient funds; balance unchanged</td></tr>
+        <tr><td>07:08:51</td><td>…e3c2</td><td>Debit</td><td style="text-align:right">IDR 75</td><td><span class="chip c-rej">Rejected</span></td><td>Account frozen by the fraud engine (4 top-ups in 5 min)</td></tr>
+        <tr><td>07:08:30</td><td>…19bb</td><td>Void</td><td style="text-align:right">IDR 300</td><td><span class="chip c-warn">Reversed</span></td><td>Original kept; a reversing entry was added</td></tr>
+        <tr><td>07:08:02</td><td>…5d70</td><td>Credit</td><td style="text-align:right">IDR 1,000</td><td><span class="chip c-ok">Settled</span></td><td>Duplicate request with the same key answered from the record, not applied again</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>How the last 10 minutes were handled</h3>
+      <div class="bars">
+        <div><i style="width:180px;background:var(--ok)"></i>Normal, first try · 19,990</div>
+        <div><i style="width:12px;background:var(--info)"></i>Retried after an outage · 1,097</div>
+        <div><i style="width:3px;background:var(--info)"></i>Completed by recovery job · 1</div>
+        <div><i style="width:6px;background:var(--bad)"></i>Rejected by a business rule · 12</div>
+        <div><i style="width:4px;background:var(--warn)"></i>Reversed (voids) · 0</div>
+      </div>
+      <h3 style="margin-top:18px">Self-healing activity</h3>
+      <table>
+        <tr><td>07:12:05</td><td>Recovery job completed 1 stuck payment</td></tr>
+        <tr><td>07:12:02</td><td>Background jobs re-acquired after the database restart</td></tr>
+        <tr><td>10:47:11</td><td>45,332 queued events delivered after Kafka recovered (11 s)</td></tr>
+        <tr><td>10:27:53</td><td>Backup worker took over all 7 jobs, 2.2 s after the main one died</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="divider">Screen 2: clicking the highlighted "Recovered" row</div>
+
+  <p class="screen-title">Transaction …7f5a, Credit IDR 180: Recovered</p>
+  <p class="sub">The audit trail. Each step is a permanent record that can't be edited or deleted, with who did it and when.</p>
+
+  <div class="split">
+    <div class="card">
+      <h3>What happened, step by step</h3>
+      <ul class="timeline">
+        <li class="ok"><div class="t">Request received and saved</div><div class="when">07:11:18.204 · by <b>payments</b> · Idempotency-Key recorded</div></li>
+        <li class="bad"><div class="t">Database stopped before the money moved</div><div class="when">07:11:18.231 · client told "202 accepted, still processing"</div></li>
+        <li class="warn"><div class="t">Client retried with the same key</div><div class="when">07:11:40 → 07:12:01 · 22 retries refused with "try again"; nothing was applied twice</div></li>
+        <li class="rec"><div class="t">Recovery job picked it up</div><div class="when">07:12:05.118 · sweeper, after the database restarted</div></li>
+        <li class="ok"><div class="t">Settled: money moved</div><div class="when">07:12:05.131 · balance IDR 100,000,000 → 100,000,180 · ledger entry #4,212</div></li>
+        <li class="ok"><div class="t">Event published to Kafka</div><div class="when">07:12:05.402 · fraud engine checked it: no rule triggered</div></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Double entry (the books always balance)</h3>
+      <table>
+        <tr><th>Ledger</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th></tr>
+        <tr><td>System: top-up clearing</td><td style="text-align:right">IDR 180</td><td></td></tr>
+        <tr><td>User account …7f5a</td><td></td><td style="text-align:right">IDR 180</td></tr>
+        <tr><td><b>Total</b></td><td style="text-align:right"><b>180</b></td><td style="text-align:right"><b>180</b></td></tr>
+      </table>
+      <h3 style="margin-top:18px">Traceability</h3>
+      <table>
+        <tr><td class="k">Transaction id</td><td class="mono">01a1bd04-40e0-7226-93f9-75f8a849a971</td></tr>
+        <tr><td>Trace id</td><td class="mono">4bf92f3577b34da6a3ce929d0e0e4736 <a href="#">open logs ↗</a></td></tr>
+        <tr><td>Requested by</td><td>payments (service)</td></tr>
+        <tr><td>Reconciler</td><td>✓ verified in the 07:12:40 check</td></tr>
+      </table>
+    </div>
+  </div>
+</main>
+</body>
+</html>
