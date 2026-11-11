@@ -131,6 +131,8 @@ A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance pe
 ### 5.4 Auth and My account (`/login`, `/register`, `/profile`, `/me`)
 
 - **Register, login, logout:** these call auth-api. The token is held in memory and in `sessionStorage`, so it's cleared when the tab closes. It's sent only to the console's own `/console/api/auth/*` and `/console/api/me/*`.
+  - *Added in C2.2:* when a session ends (a 401, a password change, a logout), the message for the login page is kept as a one-time notice in `sessionStorage`. Clearing the token re-renders at once, and a page's `RequireAuth` can redirect before the caller's own navigation lands, which would otherwise drop the message.
+  - *Known limit (C2.2):* auth-api records the login IP in `auth_token_history`. For a login through the console, that's the console container's address, because auth-api trusts no `X-Forwarded-For` (`TRUSTED_PROXIES` is empty) and the console doesn't send one. Fixing it needs a trusted, fixed address for the console.
 - **Profile:** edit `full_name` and `bio`, and change the password (§7.1). After a password change, every session ends and the user logs in again.
 - **My account:**
   - **Before an account exists:** an "Open my account" button.

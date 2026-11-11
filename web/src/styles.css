@@ -15,3 +15,16 @@ a { color: var(--info); }
 .page { padding: 20px 24px; max-width: 1240px; margin: 0 auto; }
 h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
 .sub { color: var(--muted); margin: 0 0 16px; }
+.account { display: flex; gap: 12px; align-items: center; }
+button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; }
+button:disabled { opacity: .6; cursor: default; }
+button.link { background: none; border: 0; padding: 0; color: var(--info); text-decoration: underline; }
+.narrow { max-width: 420px; }
+.form { display: grid; gap: 12px; margin: 0 0 24px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.form h2 { font-size: 15px; margin: 0; }
+.form label { display: grid; gap: 4px; font-weight: 500; }
+.form input, .form textarea { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; }
+.form textarea { min-height: 70px; }
+.hint { color: var(--muted); font-weight: 400; font-size: 12px; }
+.notice { background: var(--okbg); color: var(--ok); padding: 8px 10px; border-radius: 8px; margin: 0 0 12px; }
+.error { background: var(--badbg); color: var(--bad); padding: 8px 10px; border-radius: 8px; margin: 0; }

@@ -27,6 +27,7 @@ type Deps struct {
 	Logger         *slog.Logger
 	Web            fs.FS    // the built app (web/dist): index.html and assets/
 	TrustedProxies []string // nil: ignore X-Forwarded-For
+	Auth           Upstream // auth-api, for /console/api/auth/*, /profile, /password
 }
 
 // Security headers for everything the app is served with. The app makes
@@ -50,6 +51,13 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	apiGroup := r.Group(APIPrefix)
+	if d.Auth.BaseURL != "" {
+		p := newProxy(d.Auth)
+		for _, rt := range authRoutes {
+			apiGroup.Handle(rt.method, rt.path, p.handle(rt))
+		}
 	}
 	r.NoRoute(app(d.Web))
 	return r, nil

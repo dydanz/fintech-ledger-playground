@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -515,6 +516,7 @@ type ConsoleConfig struct {
 	ServiceName     string
 	HTTPAddr        string // CONSOLE_HTTP_ADDR
 	WebDir          string // CONSOLE_WEB_DIR: the built app (index.html, assets/)
+	AuthAPIURL      string // CONSOLE_AUTH_API_URL: auth-api, for the auth pages
 	LogLevel        slog.Level
 	TrustedProxies  []string
 	ShutdownTimeout time.Duration
@@ -526,6 +528,7 @@ func LoadConsole() (ConsoleConfig, error) {
 		ServiceName:     getEnv("SERVICE_NAME", "ledger-console"),
 		HTTPAddr:        getEnv("CONSOLE_HTTP_ADDR", ":8090"),
 		WebDir:          getEnv("CONSOLE_WEB_DIR", "/web"),
+		AuthAPIURL:      getEnv("CONSOLE_AUTH_API_URL", "http://localhost:8080"),
 		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -537,6 +540,9 @@ func LoadConsole() (ConsoleConfig, error) {
 		if cfg.ShutdownTimeout, err = time.ParseDuration(v); err != nil {
 			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT: %w", err))
 		}
+	}
+	if u, err := url.Parse(cfg.AuthAPIURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		errs = append(errs, fmt.Errorf("CONSOLE_AUTH_API_URL must be an http(s) URL, not %q", cfg.AuthAPIURL))
 	}
 	return cfg, errors.Join(errs...)
 }
