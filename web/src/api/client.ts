@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-type Options = { method?: string; body?: unknown; auth?: boolean };
+type Options = { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> };
 
 let onUnauthorized: (() => void) | null = null;
 
@@ -27,7 +27,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 // Any other error (a wrong password is 403, a refused login is an
 // unauthenticated 401) is thrown for the page to show.
 export async function api<T>(path: string, opts: Options = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   const token = session.token();
   if (opts.auth && token) headers.Authorization = `Bearer ${token}`;

@@ -128,6 +128,11 @@ services:
       SERVICE_NAME: ledger-console
       CONSOLE_HTTP_ADDR: ":8090"
       CONSOLE_AUTH_API_URL: http://api:8080
+      CONSOLE_LEDGER_API_URL: http://ledger-api:8081
+      # Demo money actions on My account, with the dev tokens from .env.example.
+      CONSOLE_DEMO_ACTIONS: ${CONSOLE_DEMO_ACTIONS:-true}
+      CONSOLE_ONBOARDING_TOKEN: ${CONSOLE_ONBOARDING_TOKEN:-dev-onboarding-token}
+      CONSOLE_PAYMENTS_TOKEN: ${CONSOLE_PAYMENTS_TOKEN:-dev-payments-token}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8090:8090"

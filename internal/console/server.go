@@ -25,9 +25,11 @@ const APIPrefix = "/console/api"
 
 type Deps struct {
 	Logger         *slog.Logger
-	Web            fs.FS    // the built app (web/dist): index.html and assets/
-	TrustedProxies []string // nil: ignore X-Forwarded-For
-	Auth           Upstream // auth-api, for /console/api/auth/*, /profile, /password
+	Web            fs.FS      // the built app (web/dist): index.html and assets/
+	TrustedProxies []string   // nil: ignore X-Forwarded-For
+	Auth           Upstream   // auth-api, for /console/api/auth/*, /profile, /password
+	Ledger         Upstream   // ledger-api, for /console/api/me/*
+	Demo           DemoConfig // the demo money actions on My account
 }
 
 // Security headers for everything the app is served with. The app makes
@@ -53,11 +55,24 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		return nil, err
 	}
 	apiGroup := r.Group(APIPrefix)
+	var authProxy, ledgerProxy *proxy
 	if d.Auth.BaseURL != "" {
-		p := newProxy(d.Auth)
+		authProxy = newProxy(d.Auth)
 		for _, rt := range authRoutes {
-			apiGroup.Handle(rt.method, rt.path, p.handle(rt))
+			apiGroup.Handle(rt.method, rt.path, authProxy.handle(rt))
 		}
+	}
+	if d.Ledger.BaseURL != "" {
+		ledgerProxy = newProxy(d.Ledger)
+		for _, rt := range meRoutes {
+			apiGroup.Handle(rt.method, rt.path, ledgerProxy.handle(rt))
+		}
+	}
+	if authProxy != nil && ledgerProxy != nil {
+		dm := &demo{cfg: d.Demo, auth: authProxy, ledger: ledgerProxy}
+		apiGroup.POST("/me/open", dm.open)
+		apiGroup.POST("/me/credit", dm.money("credit"))
+		apiGroup.POST("/me/debit", dm.money("debit"))
 	}
 	r.NoRoute(app(d.Web))
 	return r, nil

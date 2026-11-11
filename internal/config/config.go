@@ -517,6 +517,10 @@ type ConsoleConfig struct {
 	HTTPAddr        string // CONSOLE_HTTP_ADDR
 	WebDir          string // CONSOLE_WEB_DIR: the built app (index.html, assets/)
 	AuthAPIURL      string // CONSOLE_AUTH_API_URL: auth-api, for the auth pages
+	LedgerAPIURL    string // CONSOLE_LEDGER_API_URL: ledger-api, for My account
+	DemoActions     bool   // CONSOLE_DEMO_ACTIONS: open, credit and debit on My account
+	OnboardingToken string // CONSOLE_ONBOARDING_TOKEN: opens accounts; never logged
+	PaymentsToken   string // CONSOLE_PAYMENTS_TOKEN: demo credits and debits; never logged
 	LogLevel        slog.Level
 	TrustedProxies  []string
 	ShutdownTimeout time.Duration
@@ -529,6 +533,9 @@ func LoadConsole() (ConsoleConfig, error) {
 		HTTPAddr:        getEnv("CONSOLE_HTTP_ADDR", ":8090"),
 		WebDir:          getEnv("CONSOLE_WEB_DIR", "/web"),
 		AuthAPIURL:      getEnv("CONSOLE_AUTH_API_URL", "http://localhost:8080"),
+		LedgerAPIURL:    getEnv("CONSOLE_LEDGER_API_URL", "http://localhost:8081"),
+		OnboardingToken: os.Getenv("CONSOLE_ONBOARDING_TOKEN"),
+		PaymentsToken:   os.Getenv("CONSOLE_PAYMENTS_TOKEN"),
 		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -541,8 +548,19 @@ func LoadConsole() (ConsoleConfig, error) {
 			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT: %w", err))
 		}
 	}
-	if u, err := url.Parse(cfg.AuthAPIURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		errs = append(errs, fmt.Errorf("CONSOLE_AUTH_API_URL must be an http(s) URL, not %q", cfg.AuthAPIURL))
+	for key, v := range map[string]string{"CONSOLE_AUTH_API_URL": cfg.AuthAPIURL, "CONSOLE_LEDGER_API_URL": cfg.LedgerAPIURL} {
+		if u, err := url.Parse(v); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, fmt.Errorf("%s must be an http(s) URL, not %q", key, v))
+		}
+	}
+	switch v := getEnv("CONSOLE_DEMO_ACTIONS", "false"); v {
+	case "true", "false":
+		cfg.DemoActions = v == "true"
+	default:
+		errs = append(errs, fmt.Errorf("CONSOLE_DEMO_ACTIONS must be true or false, not %q", v))
+	}
+	if cfg.DemoActions && (cfg.OnboardingToken == "" || cfg.PaymentsToken == "") {
+		errs = append(errs, errors.New("CONSOLE_DEMO_ACTIONS=true needs CONSOLE_ONBOARDING_TOKEN and CONSOLE_PAYMENTS_TOKEN"))
 	}
 	return cfg, errors.Join(errs...)
 }

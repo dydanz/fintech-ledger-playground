@@ -39,8 +39,13 @@ export function Profile() {
     },
   });
 
-  if (profile.isPending) return <p className="sub">Loading your profile…</p>;
-  if (profile.isError) return <ErrorLine error={profile.error} />;
+  if (profile.isPending || profile.isError)
+    return (
+      <section className="narrow">
+        <h1>Profile</h1>
+        {profile.isError ? <ErrorLine error={profile.error} /> : <p className="sub">Loading your profile…</p>}
+      </section>
+    );
 
   return (
     <section className="narrow">
