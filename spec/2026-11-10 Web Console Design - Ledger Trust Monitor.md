@@ -217,8 +217,8 @@ The thresholds above (30 s, 5 s) are starting values for the builder to tune aga
 | `GET /internal/v1/accounts?limit=&cursor=` | accounts with status and balances, keyset-paged |
 | `GET /internal/v1/transactions?limit=&cursor=&status=&type=&since=` | transactions across accounts, newest change first (on the existing `transactions_updated_idx`) |
 | `GET /internal/v1/transactions/:id/detail` | the transaction, its event stream (type, version, `occurred_at`, payload without `reference`/`metadata`), its journal lines, and its outbox `published_at` |
-| `GET /internal/v1/accounts/:id/events` | the account's event stream (opened, frozen, unfrozen, with actor and rule) |
-| `GET /internal/v1/stats?since=` | counts by type, status and failure reason; outbox pending and oldest age; PENDING and PROCESSING counts and the oldest age |
+| `GET /internal/v1/accounts/:id/events` | the account's event stream (opened, frozen, unfrozen, with actor and rule). *Changed in C1.2:* the freeze and unfreeze `reason` is left out, because it's free text an operator typed |
+| `GET /internal/v1/stats?since=` | counts by type, status and failure reason; outbox pending and oldest age; the PENDING count and the oldest age (*changed in C1.2:* PROCESSING is never committed, since Tx2 passes through it inside one database transaction, so it isn't counted) |
 
 These are reads, so they emit no new events; the access log covers them. A new client `console` gets only `read` in `LEDGER_CLIENTS`.
 

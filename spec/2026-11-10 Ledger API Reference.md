@@ -31,6 +31,32 @@ Completed responses are also cached in Redis (`idem:ledger:<client_id>:<sha256(k
 | GET | `/internal/v1/accounts/:account_id`, `/internal/v1/accounts?user_id=` | `read` | `200` account with balances |
 | GET | `/internal/v1/transactions/:transaction_id` | `read` | `200` transaction |
 
+### Ops read routes
+
+These are for the web console and other ops tooling. They read across accounts, need only `read`, and write nothing; the access log covers them.
+
+**Never in a response:**
+- `reference` and `metadata`, which are caller-supplied free text;
+- the `reason` of a freeze or unfreeze, which is operator-typed free text.
+
+A failure's `reason` is kept, because it's a fixed code.
+
+| Method | Path | Success |
+| :--- | :--- | :--- |
+| GET | `/internal/v1/accounts?limit=&cursor=` | `200 {"accounts":[…],"next_cursor"?}`: accounts with their ledgers, in creation order. With `?user_id=` instead, the route returns that one account, as before |
+| GET | `/internal/v1/transactions?limit=&cursor=&status=&type=&since=` | `200 {"transactions":[…],"next_cursor"?}` across accounts, **newest change first** (`updated_at`). Filters: `status` (`PENDING`, `SETTLED`, `FAILED`, `VOIDED`), `type` (`CREDIT`, `DEBIT`, `VOID`), `since` (RFC 3339) |
+| GET | `/internal/v1/transactions/:transaction_id/detail` | `200 {"transaction","events","journal","outbox"}`: the event stream, the journal lines with their ledger kind, and each event's outbox row (`published_at` is null until relayed; rows are purged after `OUTBOX_RETENTION`) |
+| GET | `/internal/v1/accounts/:account_id/events` | `200 {"events":[…]}`: opened, ledger opened, frozen and unfrozen events, with `actor` and `rule` |
+| GET | `/internal/v1/stats?since=` | `200 {"since","transactions":[{type,status,failure_reason,count}],"pending":{count,oldest_age_ms},"outbox":{pending,oldest_age_ms}}`. `since` defaults to 10 minutes ago, and counts transactions changed since then. "Pending" counts `PENDING` only: `PROCESSING` is never committed, because Tx2 passes through it inside one database transaction |
+
+**Paging:** `limit` is 1–100 (default 20), and the cursor is opaque.
+
+**Changes between polls:** the transaction feed is ordered by last change, so a transaction that changes moves to the top:
+- a page read after the change doesn't repeat it;
+- the next poll of the first page finds it.
+
+The compose `console` client (`dev-console-token`) has `read` only.
+
 A `202` means the request is durable but not finished: Tx1 committed and Tx2 didn't complete within `LEDGER_PROCESS_TIMEOUT`. ledger-worker's sweeper completes it, and a retry with the same key returns the final answer.
 
 ## User routes

@@ -12,6 +12,7 @@ import (
 type LedgerDeps struct {
 	Logger         *slog.Logger
 	Ledger         *service.LedgerService
+	Ops            *service.OpsReader // read-only ops routes; nil leaves them out
 	Clients        *Clients
 	Sessions       SessionLookup                   // auth-api's Redis sessions, for /api/v1/ledger
 	Ready          func(ctx context.Context) error // dependency check for /readyz
@@ -33,7 +34,16 @@ func NewLedgerRouter(d LedgerDeps) (*gin.Engine, error) {
 	internal := r.Group("/internal/v1")
 	{
 		internal.POST("/accounts", need("account_open"), h.OpenAccount)
-		internal.GET("/accounts", need("read"), h.FindAccount)
+		if d.Ops != nil {
+			ops := &opsHandlers{ops: d.Ops, LedgerHandlers: h}
+			internal.GET("/accounts", need("read"), ops.Accounts) // ?user_id= keeps FindAccount
+			internal.GET("/accounts/:account_id/events", need("read"), ops.AccountEvents)
+			internal.GET("/transactions", need("read"), ops.Transactions)
+			internal.GET("/transactions/:transaction_id/detail", need("read"), ops.TransactionDetail)
+			internal.GET("/stats", need("read"), ops.Stats)
+		} else {
+			internal.GET("/accounts", need("read"), h.FindAccount)
+		}
 		internal.GET("/accounts/:account_id", need("read"), h.GetAccount)
 		internal.POST("/accounts/:account_id/ledgers", need("account_open"), h.OpenLedger)
 		internal.POST("/accounts/:account_id/credits", need("credit"), h.Credit)
