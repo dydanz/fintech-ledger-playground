@@ -28,3 +28,12 @@ button.link { background: none; border: 0; padding: 0; color: var(--info); text-
 .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
 .notice { background: var(--okbg); color: var(--ok); padding: 8px 10px; border-radius: 8px; margin: 0 0 12px; }
 .error { background: var(--badbg); color: var(--bad); padding: 8px 10px; border-radius: 8px; margin: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.tile .k { color: var(--muted); font-size: 12px; }
+.tile .v { font-size: 22px; font-weight: 650; margin-top: 2px; }
+.row { display: flex; gap: 8px; }
+h2 { font-size: 15px; margin: 20px 0 8px; }
+.table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; font-size: 13px; margin-bottom: 12px; }
+.table th { text-align: left; color: var(--muted); font-weight: 500; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.table td { padding: 7px 10px; border-bottom: 1px solid var(--line); }

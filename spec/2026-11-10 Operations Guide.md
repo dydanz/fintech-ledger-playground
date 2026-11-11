@@ -12,7 +12,7 @@ How to run, observe, migrate and test the stack locally. API details are in the 
 | :--- | :--- | :--- |
 | api (auth-api) | http://localhost:8080 | Registration, login, sessions, profile |
 | ledger-api | http://localhost:8081, bound to 127.0.0.1 | Ledger accounts and transactions: internal routes for trusted services, user routes for end users |
-| ledger-console | http://localhost:8090, bound to 127.0.0.1 | The web console: a React app (`web/`) served by a Go server (`cmd/ledger-console`), built by `Dockerfile.console`. Client routes get the app shell; `/console/api/*` is JSON only. `/console/api/auth/*`, `/profile` and `/password` pass through to auth-api (`CONSOLE_AUTH_API_URL`) with the user's own token |
+| ledger-console | http://localhost:8090, bound to 127.0.0.1 | The web console: a React app (`web/`) served by a Go server (`cmd/ledger-console`), built by `Dockerfile.console`. Client routes get the app shell; `/console/api/*` is JSON only. `/console/api/auth/*`, `/profile` and `/password` pass through to auth-api (`CONSOLE_AUTH_API_URL`) with the user's own token; `/console/api/me/account` and `/me/transactions` pass through to ledger-api's user routes (`CONSOLE_LEDGER_API_URL`). Demo actions (`/me/open`, `/me/credit`, `/me/debit`; `CONSOLE_DEMO_ACTIONS`, on in compose) use `CONSOLE_ONBOARDING_TOKEN` and `CONSOLE_PAYMENTS_TOKEN` on the caller's own account, IDR, 1 to 1,000,000 per action, and log `console.demo_action` |
 | ledger-worker | no published port | Background jobs, each with one leader across replicas (a Postgres advisory lock), listed below |
 | fraud-engine | no published port | Consumes `ledger.events.v1` and freezes accounts on two rules: `topup_velocity` (more than 3 top-ups in 5 min) and `debit_volume` (more than 30 debits, or over the currency limit, in 1 h) |
 | Postgres 17 | `127.0.0.1:5432` | The authority: users, audit trail, ledger schema |
@@ -101,6 +101,7 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 | `make smoke` | register → login → profile → logout → token rejected | `make up` |
 | `make smoke-ledger` | open account → credit → debit → insufficient funds → replay → freeze → auth checks | `make up` |
 | `make smoke-fraud` | 4 top-ups freeze an account within 2 s | `make up`, with the default fraud thresholds |
+| `make smoke-console` | Through the console: register → login → open → top up → balance → refusals → four top-ups freeze the account → a frozen spend is refused | `make up`, with the default fraud thresholds |
 | `make check-alerts` | alert rules load, dashboard queries run, alerts trip | `make up` |
 | `make load` | the TRD §13.4 load test (below) | `make load-up` |
 | `make chaos FAULT=…` | a TRD §13.5 fault drill (below) | `make load-up`, in a throwaway project |

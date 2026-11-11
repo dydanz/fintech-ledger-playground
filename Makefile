@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
+.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console logs-fraud psql
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -82,6 +82,9 @@ smoke:
 
 smoke-ledger: ## needs api and ledger-api running (make up)
 	./scripts/smoke-ledger.sh
+
+smoke-console: ## the web console's API end to end, incl. the fraud freeze (needs make up)
+	./scripts/smoke-console.sh
 
 smoke-fraud: ## 4 top-ups freeze an account within 2 s (needs make up)
 	./scripts/smoke-fraud.sh

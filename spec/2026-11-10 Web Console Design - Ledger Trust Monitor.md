@@ -232,6 +232,11 @@ The console holds:
 
 Each action sends a fresh `Idempotency-Key` per click. Demo actions are on when `CONSOLE_DEMO_ACTIONS=true`, the compose default, and they never act on another user's account.
 
+*Added in C2.3:*
+- **Keys:** the console namespaces each click's key as `console:<account_id>:<key>`, and opening uses `console-open-<user_id>`, so a second open returns the same account.
+- **Accountability:** each action logs `console.demo_action` with `user_id`, because ledger-api's own events record only `client_id` (`onboarding` / `payments`), not the end user.
+- **Defaults:** `CONSOLE_DEMO_ACTIONS` defaults to off in code; compose turns it on.
+
 ### 7.4 `ledger-console` API (`/console/api/*`)
 
 | Area | Routes |

@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react';
-import { renderApp } from './test/render';
+import { mockFetch, renderApp } from './test/render';
 
 const renderAt = renderApp;
 
@@ -9,10 +9,11 @@ describe('App routes', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Log in' })).toBeInTheDocument();
   });
 
-  it('shows My account to a signed-in user', () => {
+  it('shows My account to a signed-in user', async () => {
     sessionStorage.setItem('ledger-console.token', 'tok');
+    mockFetch({ 'GET /me/account': { status: 404, body: { error: { code: 'account_not_found', message: 'account not found' } } } });
     renderAt('/me');
-    expect(screen.getByRole('heading', { level: 1, name: 'My account' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'My account' })).toBeInTheDocument();
   });
 
   it.each([

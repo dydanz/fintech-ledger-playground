@@ -33,17 +33,25 @@ const maxUpstreamBody = 1 << 20
 // proxyRoute maps one console route to one upstream route.
 type proxyRoute struct {
 	method, path, upstreamPath, operation string
+	keepQuery                             bool // pass the query string on (paging)
 }
 
 // authRoutes pass through to auth-api (D§7.4). The user's own token, when
 // the app sends one, goes upstream as is; the console adds none.
 var authRoutes = []proxyRoute{
-	{"POST", "/auth/register", "/api/v1/auth/register", "auth_register"},
-	{"POST", "/auth/login", "/api/v1/auth/login", "auth_login"},
-	{"POST", "/auth/logout", "/api/v1/auth/logout", "auth_logout"},
-	{"GET", "/profile", "/api/v1/users/profile", "profile_get"},
-	{"PUT", "/profile", "/api/v1/users/profile", "profile_update"},
-	{"PUT", "/password", "/api/v1/users/password", "password_change"},
+	{"POST", "/auth/register", "/api/v1/auth/register", "auth_register", false},
+	{"POST", "/auth/login", "/api/v1/auth/login", "auth_login", false},
+	{"POST", "/auth/logout", "/api/v1/auth/logout", "auth_logout", false},
+	{"GET", "/profile", "/api/v1/users/profile", "profile_get", false},
+	{"PUT", "/profile", "/api/v1/users/profile", "profile_update", false},
+	{"PUT", "/password", "/api/v1/users/password", "password_change", false},
+}
+
+// meRoutes pass through to ledger-api's user routes (D§5.4): ledger-api
+// resolves the account from the user's own session.
+var meRoutes = []proxyRoute{
+	{"GET", "/me/account", "/api/v1/ledger/account", "me_account", false},
+	{"GET", "/me/transactions", "/api/v1/ledger/transactions", "me_transactions", true},
 }
 
 // forwardedHeaders are the only request headers sent upstream. Cookies and
@@ -73,32 +81,18 @@ func newProxy(up Upstream) *proxy {
 // logged by that service, not again here. Bodies are never logged.
 func (p *proxy) handle(rt proxyRoute) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx := c.Request.Context()
-		req, err := http.NewRequestWithContext(ctx, rt.method, p.up.BaseURL+rt.upstreamPath, c.Request.Body)
-		if err != nil {
-			_ = c.Error(err)
-			api.AbortError(c, http.StatusInternalServerError, "internal_error", "internal server error")
-			return
+		target := rt.upstreamPath
+		if rt.keepQuery && c.Request.URL.RawQuery != "" {
+			target += "?" + c.Request.URL.RawQuery
 		}
+		hdr := http.Header{}
 		for _, h := range forwardedHeaders {
 			if v := c.GetHeader(h); v != "" {
-				req.Header.Set(h, v)
+				hdr.Set(h, v)
 			}
 		}
-		// One trace across both services: the same request id, the same
-		// trace id, and a new span for this call.
-		req.Header.Set("X-Request-ID", c.GetString("request_id"))
-		if traceID := c.GetString("trace_id"); traceID != "" {
-			req.Header.Set("traceparent", "00-"+traceID+"-"+newSpanID()+"-01")
-		}
-
-		start := time.Now()
-		resp, err := p.client.Do(req)
-		if err != nil {
-			logger.FromContext(ctx).WarnContext(ctx, "upstream call failed", "event", "dependency.call", "outcome", "failure",
-				"reason", callReason(err), "dependency", p.up.Name, "operation", rt.operation,
-				"duration_ms", float64(time.Since(start).Microseconds())/1000, "error", err)
-			api.AbortError(c, http.StatusServiceUnavailable, "upstream_unavailable", p.up.Name+" is temporarily unavailable; try again")
+		resp, ok := p.call(c, rt.method, target, hdr, c.Request.Body, rt.operation)
+		if !ok {
 			return
 		}
 		defer resp.Body.Close()
@@ -110,6 +104,36 @@ func (p *proxy) handle(rt proxyRoute) gin.HandlerFunc {
 		c.Status(resp.StatusCode)
 		_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, maxUpstreamBody))
 	}
+}
+
+// call sends one request upstream with the given headers, plus the request
+// id and trace (one trace across both services: the same request id and
+// trace id, a new span). If the upstream can't be reached it logs one
+// dependency.call, answers 503 and returns ok=false; the caller closes the
+// response otherwise.
+func (p *proxy) call(c *gin.Context, method, target string, hdr http.Header, body io.Reader, operation string) (*http.Response, bool) {
+	ctx := c.Request.Context()
+	req, err := http.NewRequestWithContext(ctx, method, p.up.BaseURL+target, body)
+	if err != nil {
+		_ = c.Error(err)
+		api.AbortError(c, http.StatusInternalServerError, "internal_error", "internal server error")
+		return nil, false
+	}
+	req.Header = hdr
+	req.Header.Set("X-Request-ID", c.GetString("request_id"))
+	if traceID := c.GetString("trace_id"); traceID != "" {
+		req.Header.Set("traceparent", "00-"+traceID+"-"+newSpanID()+"-01")
+	}
+	start := time.Now()
+	resp, err := p.client.Do(req)
+	if err != nil {
+		logger.FromContext(ctx).WarnContext(ctx, "upstream call failed", "event", "dependency.call", "outcome", "failure",
+			"reason", callReason(err), "dependency", p.up.Name, "operation", operation,
+			"duration_ms", float64(time.Since(start).Microseconds())/1000, "error", err)
+		api.AbortError(c, http.StatusServiceUnavailable, "upstream_unavailable", p.up.Name+" is temporarily unavailable; try again")
+		return nil, false
+	}
+	return resp, true
 }
 
 // callReason maps a client error to the dependency.call reasons: timeout,

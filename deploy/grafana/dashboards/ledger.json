@@ -940,6 +940,38 @@
         "wrapLogMessage": true,
         "sortOrder": "Descending"
       }
+    },
+    {
+      "id": 106,
+      "type": "timeseries",
+      "title": "Console demo actions by outcome and reason (console.demo_action)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 116
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"ledger-console\"} | json | event=\"console.demo_action\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
     }
   ],
   "description": "ledger-api and ledger-worker: TRD §11.2. Alert rules: deploy/grafana/provisioning/alerting/ledger.yaml (§11.3)."
