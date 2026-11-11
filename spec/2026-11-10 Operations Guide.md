@@ -12,6 +12,7 @@ How to run, observe, migrate and test the stack locally. API details are in the 
 | :--- | :--- | :--- |
 | api (auth-api) | http://localhost:8080 | Registration, login, sessions, profile |
 | ledger-api | http://localhost:8081, bound to 127.0.0.1 | Ledger accounts and transactions: internal routes for trusted services, user routes for end users |
+| ledger-console | http://localhost:8090, bound to 127.0.0.1 | The web console: a React app (`web/`) served by a Go server (`cmd/ledger-console`), built by `Dockerfile.console`. Client routes get the app shell; `/console/api/*` is JSON only |
 | ledger-worker | no published port | Background jobs, each with one leader across replicas (a Postgres advisory lock), listed below |
 | fraud-engine | no published port | Consumes `ledger.events.v1` and freezes accounts on two rules: `topup_velocity` (more than 3 top-ups in 5 min) and `debit_volume` (more than 30 debits, or over the currency limit, in 1 h) |
 | Postgres 17 | `127.0.0.1:5432` | The authority: users, audit trail, ledger schema |
@@ -95,6 +96,7 @@ sum by (route) (rate({service="auth-api"} | json | message="http_request" [1m]))
 | Command | What it runs | Needs |
 | :--- | :--- | :--- |
 | `make vet test` | Unit and HTTP-level tests (miniredis and in-memory fakes; franz-go's `kfake` for the Kafka producer) | nothing |
+| `make test-web` | The web console's `npm ci`, `tsc --noEmit` and Vitest, in `node:22-alpine` (no Node on the host). `cd web && npm run dev` gives live reload against a running stack, if you have Node | Docker |
 | `make test-integration` | Tests behind the `integration` build tag, with `-race`, against real Postgres, Kafka and S3 | `docker compose up -d postgres kafka kafka-init archive-store` |
 | `make smoke` | register → login → profile → logout → token rejected | `make up` |
 | `make smoke-ledger` | open account → credit → debit → insufficient funds → replay → freeze → auth checks | `make up` |

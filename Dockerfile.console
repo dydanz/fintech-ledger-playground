@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+
+# ledger-console: the Go server plus the built React app (web/). Separate from
+# the shared Dockerfile so the other services don't build the web app.
+#   docker build -f Dockerfile.console .
+
+# ---- web build stage ----
+# npm ci installs exactly the lockfile; --ignore-scripts runs no package
+# install scripts.
+FROM node:22-alpine AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+# ---- go build stage ----
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/ledger-console
+
+# ---- runtime stage ----
+# Distroless static: no shell, no package manager, runs as uid 65532.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/app /app
+COPY --from=web /web/dist /web
+USER nonroot:nonroot
+EXPOSE 8090
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/app", "healthcheck"]
+ENTRYPOINT ["/app"]

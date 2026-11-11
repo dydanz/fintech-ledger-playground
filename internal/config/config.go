@@ -507,3 +507,36 @@ func loadArchive(after time.Duration) (ArchiveConfig, error) {
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ConsoleConfig is ledger-console's environment (spec/2026-11-10 Web
+// Console Design D§4). Upstream URLs and service tokens are added with the
+// routes that use them (C2.2, C2.3).
+type ConsoleConfig struct {
+	ServiceName     string
+	HTTPAddr        string // CONSOLE_HTTP_ADDR
+	WebDir          string // CONSOLE_WEB_DIR: the built app (index.html, assets/)
+	LogLevel        slog.Level
+	TrustedProxies  []string
+	ShutdownTimeout time.Duration
+}
+
+func LoadConsole() (ConsoleConfig, error) {
+	var errs []error
+	cfg := ConsoleConfig{
+		ServiceName:     getEnv("SERVICE_NAME", "ledger-console"),
+		HTTPAddr:        getEnv("CONSOLE_HTTP_ADDR", ":8090"),
+		WebDir:          getEnv("CONSOLE_WEB_DIR", "/web"),
+		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
+		ShutdownTimeout: 15 * time.Second,
+	}
+	if err := cfg.LogLevel.UnmarshalText([]byte(getEnv("LOG_LEVEL", "info"))); err != nil {
+		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
+	}
+	if v := os.Getenv("SHUTDOWN_TIMEOUT"); v != "" {
+		var err error
+		if cfg.ShutdownTimeout, err = time.ParseDuration(v); err != nil {
+			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT: %w", err))
+		}
+	}
+	return cfg, errors.Join(errs...)
+}

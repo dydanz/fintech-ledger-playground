@@ -1,0 +1,17 @@
+/* Palette and spacing from spec/mockups/2026-11-10 console-monitor-v1.html. */
+:root {
+  --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #6b7280; --line: #e5e7eb;
+  --ok: #15803d; --okbg: #e8f5ec; --warn: #b45309; --warnbg: #fdf3e2;
+  --bad: #b91c1c; --badbg: #fdecec; --info: #1d4ed8; --infobg: #e8effd;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+a { color: var(--info); }
+.topbar { display: flex; align-items: center; gap: 24px; padding: 12px 24px; background: var(--card); border-bottom: 1px solid var(--line); }
+.brand { font-size: 16px; }
+.topbar nav a { color: var(--muted); margin-right: 16px; text-decoration: none; }
+.topbar nav a.on { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+.viewer { margin-left: auto; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+.page { padding: 20px 24px; max-width: 1240px; margin: 0 auto; }
+h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 16px; }

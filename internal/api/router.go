@@ -45,6 +45,12 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	return r, nil
 }
 
+// NewBaseEngine is newEngine for services outside this package
+// (ledger-console): the same middleware, error envelope and health routes.
+func NewBaseEngine(log *slog.Logger, trustedProxies []string, ready func(ctx context.Context) error) (*gin.Engine, error) {
+	return newEngine(log, trustedProxies, ready)
+}
+
 // newEngine builds the base every service shares: the middleware chain,
 // JSON 404/405, /healthz and /readyz (ready checks the dependencies).
 func newEngine(log *slog.Logger, trustedProxies []string, ready func(ctx context.Context) error) (*gin.Engine, error) {

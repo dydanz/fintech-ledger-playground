@@ -185,3 +185,24 @@ func TestLoadWorkerArchive(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConsole(t *testing.T) {
+	for _, k := range []string{"SERVICE_NAME", "CONSOLE_HTTP_ADDR", "CONSOLE_WEB_DIR", "LOG_LEVEL", "SHUTDOWN_TIMEOUT", "TRUSTED_PROXIES"} {
+		t.Setenv(k, "")
+	}
+	cfg, err := config.LoadConsole()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServiceName != "ledger-console" || cfg.HTTPAddr != ":8090" || cfg.WebDir != "/web" || cfg.ShutdownTimeout != 15*time.Second {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+	for key, val := range map[string]string{"LOG_LEVEL": "loud", "SHUTDOWN_TIMEOUT": "soon"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, val)
+			if _, err := config.LoadConsole(); err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("%s=%s accepted: %v", key, val, err)
+			}
+		})
+	}
+}
