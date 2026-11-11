@@ -183,7 +183,7 @@ These are the design's D§11 drafting decisions. Each is assumed unless the revi
 | Risk | Mitigation |
 | :--- | :--- |
 | LogQL queries are slow at load-test volume | Narrow selectors (`{service=…}` + `| json` on named fields only, as in `scripts/load/run.sh`), a 2 s cache, and the timeouts in 3.1 |
-| `GET /internal/v1/stats` cost grows with the rows changed in the window: measured in C1.2 at 28,279 rows in 29 ms on `transactions_updated_idx`, so about 150 ms for 10 minutes at 300 TPS, but far too slow for 24 h | The Monitor's tiles use the short window. Longer windows (1 h–24 h) need a cheaper source before C3.2 offers them, e.g. hourly counts from the access log in Loki, or a cap on the selectable window |
+| `GET /internal/v1/stats` cost grows with the rows changed in the window: measured in C1.2 at 28,279 rows in 29 ms on `transactions_updated_idx`, so about 150 ms for 10 minutes at 300 TPS, but far too slow for 24 h | The Monitor's tiles use the short window. Longer windows (1 h–24 h) need a cheaper source before C3.2 offers them, e.g. hourly counts from the access log in Loki, or a cap on the selectable window. **Decided in C3.1:** the tiles cover a fixed 10 minutes and the signals look back 30 minutes; no window selector in the MVP |
 | Loki's 7-day retention hides older incidents | Stated on the Monitor's window selector; the ledger data isn't affected |
 | A frontend toolchain the host lacks (no Node) | Everything web runs in containers: `make test-web` and the Docker build |
 | Console load skews a load test | The console polls only while a tab is open; the cache absorbs extra tabs. Note it in the load results when the console is open during a run |

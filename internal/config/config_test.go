@@ -187,7 +187,7 @@ func TestLoadWorkerArchive(t *testing.T) {
 }
 
 func TestLoadConsole(t *testing.T) {
-	for _, k := range []string{"SERVICE_NAME", "CONSOLE_HTTP_ADDR", "CONSOLE_WEB_DIR", "CONSOLE_AUTH_API_URL", "CONSOLE_LEDGER_API_URL", "CONSOLE_DEMO_ACTIONS", "CONSOLE_ONBOARDING_TOKEN", "CONSOLE_PAYMENTS_TOKEN", "LOG_LEVEL", "SHUTDOWN_TIMEOUT", "TRUSTED_PROXIES"} {
+	for _, k := range []string{"SERVICE_NAME", "CONSOLE_HTTP_ADDR", "CONSOLE_WEB_DIR", "CONSOLE_AUTH_API_URL", "CONSOLE_LEDGER_API_URL", "CONSOLE_DEMO_ACTIONS", "CONSOLE_ONBOARDING_TOKEN", "CONSOLE_PAYMENTS_TOKEN", "CONSOLE_READ_TOKEN", "CONSOLE_LOKI_URL", "LOG_LEVEL", "SHUTDOWN_TIMEOUT", "TRUSTED_PROXIES"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := config.LoadConsole()
@@ -197,7 +197,7 @@ func TestLoadConsole(t *testing.T) {
 	if cfg.ServiceName != "ledger-console" || cfg.HTTPAddr != ":8090" || cfg.WebDir != "/web" || cfg.AuthAPIURL != "http://localhost:8080" || cfg.LedgerAPIURL != "http://localhost:8081" || cfg.DemoActions || cfg.ShutdownTimeout != 15*time.Second {
 		t.Fatalf("defaults = %+v", cfg)
 	}
-	for key, val := range map[string]string{"LOG_LEVEL": "loud", "SHUTDOWN_TIMEOUT": "soon", "CONSOLE_AUTH_API_URL": "api:8080", "CONSOLE_LEDGER_API_URL": "ftp://x", "CONSOLE_DEMO_ACTIONS": "yes"} {
+	for key, val := range map[string]string{"LOG_LEVEL": "loud", "SHUTDOWN_TIMEOUT": "soon", "CONSOLE_AUTH_API_URL": "api:8080", "CONSOLE_LEDGER_API_URL": "ftp://x", "CONSOLE_DEMO_ACTIONS": "yes", "CONSOLE_LOKI_URL": "loki:3100"} {
 		t.Run(key, func(t *testing.T) {
 			t.Setenv(key, val)
 			if _, err := config.LoadConsole(); err == nil || !strings.Contains(err.Error(), key) {

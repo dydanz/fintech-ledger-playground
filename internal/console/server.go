@@ -30,6 +30,7 @@ type Deps struct {
 	Auth           Upstream   // auth-api, for /console/api/auth/*, /profile, /password
 	Ledger         Upstream   // ledger-api, for /console/api/me/*
 	Demo           DemoConfig // the demo money actions on My account
+	Ops            OpsConfig  // the read-only ops routes (needs Ledger and a read token)
 }
 
 // Security headers for everything the app is served with. The app makes
@@ -67,6 +68,14 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		for _, rt := range meRoutes {
 			apiGroup.Handle(rt.method, rt.path, ledgerProxy.handle(rt))
 		}
+	}
+	if ledgerProxy != nil && d.Ops.ReadToken != "" {
+		o := newOps(d.Ops, ledgerProxy)
+		apiGroup.GET("/ops/monitor", o.monitor)
+		apiGroup.GET("/ops/transactions", o.transactions)
+		apiGroup.GET("/ops/transactions/:id", o.transaction)
+		apiGroup.GET("/ops/accounts", o.accounts)
+		apiGroup.GET("/ops/accounts/:id", o.account)
 	}
 	if authProxy != nil && ledgerProxy != nil {
 		dm := &demo{cfg: d.Demo, auth: authProxy, ledger: ledgerProxy}

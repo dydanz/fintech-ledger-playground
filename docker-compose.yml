@@ -133,6 +133,10 @@ services:
       CONSOLE_DEMO_ACTIONS: ${CONSOLE_DEMO_ACTIONS:-true}
       CONSOLE_ONBOARDING_TOKEN: ${CONSOLE_ONBOARDING_TOKEN:-dev-onboarding-token}
       CONSOLE_PAYMENTS_TOKEN: ${CONSOLE_PAYMENTS_TOKEN:-dev-payments-token}
+      # The ops screens: ledger-api reads (the read-only console client) and
+      # the activity signals from Loki.
+      CONSOLE_READ_TOKEN: ${CONSOLE_READ_TOKEN:-dev-console-token}
+      CONSOLE_LOKI_URL: http://loki:3100
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8090:8090"
