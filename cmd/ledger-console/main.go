@@ -50,7 +50,8 @@ func run(cfg config.ConsoleConfig, log *slog.Logger) error {
 	}
 
 	gin.SetMode(gin.ReleaseMode)
-	router, err := console.NewRouter(console.Deps{Logger: log, Web: web, TrustedProxies: cfg.TrustedProxies})
+	router, err := console.NewRouter(console.Deps{Logger: log, Web: web, TrustedProxies: cfg.TrustedProxies,
+		Auth: console.Upstream{Name: "auth-api", BaseURL: cfg.AuthAPIURL}})
 	if err != nil {
 		return err
 	}
