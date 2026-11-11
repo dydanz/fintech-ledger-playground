@@ -117,6 +117,27 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Web console (spec/2026-11-10 Web Console Design): the React app and its
+  # /console/api. Bound to the host only; the ops screens have no login (MVP).
+  ledger-console:
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    image: ledger-console:local
+    environment:
+      SERVICE_NAME: ledger-console
+      CONSOLE_HTTP_ADDR: ":8090"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8090:8090"
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   kafka:
     image: apache/kafka:4.1.0
     environment:

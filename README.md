@@ -22,6 +22,7 @@ make smoke-ledger         # ledger: open -> credit -> debit -> NSF -> replay -> 
 | :--- | :--- |
 | auth-api | http://localhost:8080 |
 | ledger-api | http://localhost:8081 (127.0.0.1 only) |
+| Web console | http://localhost:8090 (127.0.0.1 only; being built, see the [design](<spec/2026-11-10 Web Console Design - Ledger Trust Monitor.md>)) |
 | Grafana | http://localhost:3000 (admin / admin): dashboards **auth-api overview** and **ledger overview** |
 
 ## How it fits together
@@ -44,6 +45,7 @@ service ─► ledger-api ─► Postgres: events + journal + outbox, in one tra
 | `make logs-ledger` / `logs-worker` / `logs-fraud` | Follow one service's logs |
 | `make psql` · `make kafka-topics` | Postgres shell · describe the Kafka topic |
 | `make vet test` | Unit tests |
+| `make test-web` | Web console typecheck and tests (in a Node container) |
 | `make test-integration` | Integration tests (start `postgres kafka kafka-init archive-store` first) |
 | `make smoke-fraud` · `make check-alerts` | Fraud end to end · Grafana alert rules |
 | `make load PROFILE=quick` | Load test, about 2 min (after `make load-up`) |

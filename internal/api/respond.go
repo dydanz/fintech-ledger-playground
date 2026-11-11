@@ -23,3 +23,7 @@ func abortError(c *gin.Context, status int, code, msg string) {
 		RequestID: c.GetString(ctxRequestID),
 	}})
 }
+
+// AbortError is abortError for other packages that build on NewBaseEngine
+// (ledger-console), so every service answers with the same envelope.
+func AbortError(c *gin.Context, status int, code, msg string) { abortError(c, status, code, msg) }

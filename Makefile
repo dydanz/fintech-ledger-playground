@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
+.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud logs-fraud psql
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -65,6 +65,12 @@ TEST_S3_SECRET_KEY ?= archive_dev_secret
 TEST_DATABASE_URL ?= postgres://auth:auth_dev_password@localhost:5432/auth?sslmode=disable
 TEST_REDIS_ADDR ?= 127.0.0.1:6379
 TEST_REDIS_PASSWORD ?= redis_dev_password
+# Web console: typecheck and unit tests in a Node container (no Node on the host needed).
+WEB_NODE ?= node:22-alpine
+test-web: ## web console: npm ci, tsc --noEmit and Vitest in $(WEB_NODE)
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)/web":/web -w /web $(WEB_NODE) \
+		sh -c 'npm ci --ignore-scripts --no-audit --no-fund --loglevel=error && npm run typecheck && npm test'
+
 test-integration:
 	TEST_DATABASE_URL='$(TEST_DATABASE_URL)' TEST_KAFKA_BROKERS='$(TEST_KAFKA_BROKERS)' TEST_S3_ENDPOINT='$(TEST_S3_ENDPOINT)' TEST_S3_ACCESS_KEY='$(TEST_S3_ACCESS_KEY)' TEST_S3_SECRET_KEY='$(TEST_S3_SECRET_KEY)' TEST_REDIS_ADDR='$(TEST_REDIS_ADDR)' TEST_REDIS_PASSWORD='$(TEST_REDIS_PASSWORD)' go test -race -count=1 -tags integration ./...
 

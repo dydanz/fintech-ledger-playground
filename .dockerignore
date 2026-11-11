@@ -5,3 +5,7 @@ deploy/
 scripts/
 docker-compose.yml
 Dockerfile
+web/node_modules
+web/dist
+load-results
+chaos-results
