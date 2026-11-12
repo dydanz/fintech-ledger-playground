@@ -194,12 +194,12 @@ The alert also showed `Pending (NoData)` in the first minute of the after run. T
 
 **The drill again,** on an isolated stack, alternating builds (`make chaos FAULT=redis`, 50 writes/s, Redis stopped for 60 s):
 
-| Run | ledger-api | Write time p50 / p99 before → during → after | `dependency.call` lines |
+| Run | ledger-api | Write time p50 / p99 before → during → after | `dependency.call` lines (Loki, `dependency=redis`) |
 | :--- | :--- | :--- | :--- |
 | `1794465809` | breaker | 3 / 16 → 2 / 16 → 3 / 231 ms | 4: the opening failure, the recovery (`skipped` 6,122, `down_ms` 61,284), then a 12 ms blip that opened and closed it |
-| `1794466068` | `main` | 3 / 11 → 191 / 330 → 3 / 19 ms | 2 per write |
+| `1794466068` | `main` | 3 / 11 → 191 / 330 → 3 / 19 ms | 6,069: two per write (get and set) |
 | `1794466298` | breaker | 3 / 11 → 2 / 23 → 3 / 142 ms | 2: the opening failure, the recovery (`skipped` 6,120) |
-| `1794466597` | `main` | 3 / 88 → 193 / 357 → 6 / 1,875 ms | 2 per write |
+| `1794466597` | `main` | 3 / 88 → 193 / 357 → 6 / 1,875 ms | 6,126 |
 
 During the outage, the probe adds about 100 ms to one write every 5 s, which shows as `max` 108–119 ms. The "after" p99 varies between runs on both builds (19 to 1,875 ms). The slow writes come in bursts that start 15–60 s after Redis is back, unrelated to the recovery moment. In one burst, every in-flight request finished within 30 ms of the others, and no cache timeout was logged. That's the laptop under load (Docker Desktop), not the cache: `main` shows it too.
 
