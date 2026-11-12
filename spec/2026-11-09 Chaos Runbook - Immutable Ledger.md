@@ -41,7 +41,7 @@ Every recorded run also passed the common checks in §1 and had no host stalls. 
 
 **Problems found:**
 - **Fixed** (`fix/outbox-publish-stall`): a Kafka outage blocked the outbox relay for its whole length, so the relay didn't report lag or escalate errors while it lasted. The lag alert fired 4.5 minutes in, through its "no heartbeat" path. After the fix, the same drill fired the alert on the lag value 2.5 minutes in (§6.1).
-- **Open:** a hung (not dead) worker leader keeps its jobs indefinitely (§6.3). This is outside §13.5 and was found with an extra probe.
+- **Fixed** (`fix/worker-hung-leader`, #59): a hung (not dead) worker leader kept its jobs indefinitely. Now the follower takes them over about 10 s into the freeze (§6.3). This is outside §13.5 and was found with an extra probe.
 
 ## 3. How to run a drill
 
@@ -189,7 +189,7 @@ The alert also showed `Pending (NoData)` in the first minute of the after run. T
 
 **Not decided:** whether this is acceptable for a degraded mode. If it isn't, a short circuit breaker would skip Redis after a failure, for example for 5 s, and probe again. That would remove both the latency and the log volume. Logging once per outage, as `outbox.Notifier` does, would also need an exception to the one-event-per-occurrence rule in `.claude/rules/observability-logging.md`.
 
-### 6.3 A hung leader keeps its jobs (outside §13.5)
+### 6.3 A hung leader kept its jobs (outside §13.5; fixed)
 
 **The probe:**
 - The kill drill covers a leader that dies: its connections close, Postgres releases the advisory locks, and the other replica takes over within `AcquireEvery`.
@@ -201,7 +201,26 @@ The alert also showed `Pending (NoData)` in the first minute of the after run. T
 - the sweeper;
 - the reconciler.
 
-**A likely fix:** set `idle_session_timeout` (e.g. 10 s) on the lock connection. The leader pings it every second (`LeaseCheck`), so it's never idle while healthy, and Postgres would end a hung leader's session and free its locks. Not tested yet.
+**Fix** (`fix/worker-hung-leader`, #59):
+- On becoming leader, a replica sets `idle_session_timeout` to `Runner.LeaseTimeout` (10 s) on its lock connection. It pings that connection every `LeaseCheck` (1 s), so a healthy leader is never idle for that long. A frozen one is: Postgres ends its session, which frees the locks.
+- The setting is reset before the connection returns to the pool. Otherwise a pooled connection would be killed while it sat idle.
+- When the frozen replica resumes, its next ping fails. It cancels its jobs and logs `app.leader failure connection_lost` for each one. In the at most `LeaseCheck` before that ping, a job that was frozen mid-run can carry on alongside the new leader, as after a network partition. For three jobs that's harmless:
+  - the relay's publishes are at-least-once;
+  - the sweeper locks each transaction `FOR UPDATE`, and processing a finished one is a no-op;
+  - the reconciler only reads.
+
+  For the partition, purge and archiver jobs, this overlap hasn't been checked.
+- **Tests:**
+  - `TestHungLeaderLosesTheLock`: a leader that never pings loses the lock;
+  - `TestLeaseTimeoutIsResetBeforeTheConnectionReturnsToThePool`: catches a missing reset.
+
+**The probe again**, with `docker pause` on the leader for 60 s and two replicas on an isolated stack:
+
+| | `main` | With the fix |
+| :--- | :--- | :--- |
+| Advisory locks held by the frozen leader | all 7, for the whole 60 s | all 7 until about 9 s, then none |
+| Jobs taken over by the follower | 0 | 7 (`app.leader acquired`), about 10 s into the freeze |
+| The frozen leader after `docker unpause` | carries on leading | 7 × `app.leader failure connection_lost`, then `released`; the follower stays leader |
 
 ### 6.4 Smaller observations
 
