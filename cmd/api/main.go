@@ -38,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// `auth-api grant-role --email <email> --role ops|user` (make grant-role):
+	// `auth-api grant-role --email <email> --role ops|user --by <you>` (make grant-role):
 	// the only way to change a role; no API route does it.
 	if len(os.Args) > 1 && os.Args[1] == "grant-role" {
 		if err := grantRole(cfg, log, os.Args[2:]); err != nil {
@@ -60,6 +60,7 @@ func grantRole(cfg config.Config, log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("grant-role", flag.ContinueOnError)
 	email := fs.String("email", "", "the user's email")
 	role := fs.String("role", "ops", "ops or user")
+	by := fs.String("by", "", "who is making the change (kept in user_role_changes)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -73,7 +74,7 @@ func grantRole(cfg config.Config, log *slog.Logger, args []string) error {
 		return err
 	}
 	defer db.Close()
-	u, err := service.NewRoleService(repository.NewUserRepo(db)).SetRole(logger.WithContext(ctx, log), *email, *role)
+	u, err := service.NewRoleService(repository.NewUserRepo(db)).SetRole(logger.WithContext(ctx, log), *email, *role, *by)
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		return errors.New("no user with that email; register it first")

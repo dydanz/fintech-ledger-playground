@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,15 +52,40 @@ func TestUserRole(t *testing.T) {
 	if u.Role != "user" {
 		t.Fatalf("new user role = %q, want user", u.Role)
 	}
-	prev, got, err := users.SetRole(ctx, "role@example.com", "ops")
+	prev, got, err := users.SetRole(ctx, "role@example.com", "ops", "alice-admin")
 	if err != nil || prev != "user" || got.Role != "ops" || got.ID != u.ID || !got.UpdatedAt.After(u.UpdatedAt) {
 		t.Fatalf("SetRole = %q %+v %v", prev, got, err)
 	}
 	if again, err := users.GetByID(ctx, u.ID); err != nil || again.Role != "ops" {
 		t.Fatalf("GetByID after SetRole = %+v %v", again, err)
 	}
-	if _, _, err := users.SetRole(ctx, "nobody@example.com", "ops"); !errors.Is(err, repository.ErrNotFound) {
+	if _, _, err := users.SetRole(ctx, "nobody@example.com", "ops", "alice-admin"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("unknown email: %v, want ErrNotFound", err)
+	}
+	// Every change is recorded in the same statement, append-only: who ran
+	// it, the role before and after.
+	if _, _, err := users.SetRole(ctx, "role@example.com", "user", "bob-admin"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `SELECT role, previous_role, changed_by FROM user_role_changes WHERE user_id = $1 ORDER BY id`, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var history []string
+	for rows.Next() {
+		var role, prev, by string
+		if err := rows.Scan(&role, &prev, &by); err != nil {
+			t.Fatal(err)
+		}
+		history = append(history, prev+"->"+role+" by "+by)
+	}
+	if strings.Join(history, ", ") != "user->ops by alice-admin, ops->user by bob-admin" {
+		t.Fatalf("role history = %v", history)
+	}
+	for _, stmt := range []string{`UPDATE user_role_changes SET changed_by = 'mallory'`, `DELETE FROM user_role_changes`, `TRUNCATE user_role_changes`} {
+		if _, err := pool.Exec(ctx, stmt); err == nil {
+			t.Fatalf("%s: allowed on the append-only role history", stmt)
+		}
 	}
 	if _, err := pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, u.ID); err == nil {
 		t.Fatal("the database accepted role 'admin'")

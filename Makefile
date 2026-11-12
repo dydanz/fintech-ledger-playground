@@ -18,8 +18,8 @@ migrate: ## apply pending migrations (`up` does this too)
 rebuild-projections: ## recompute projections from events + journal (TRD §7.6)
 	docker compose run --rm --no-deps ledger-worker rebuild-projections $(ARGS)
 
-grant-role: ## give a user a role: make grant-role EMAIL=you@example.com [ROLE=ops|user]. ops opens the console's ops screens
-	docker compose run --rm --no-deps api grant-role --email '$(EMAIL)' --role '$(or $(ROLE),ops)'
+grant-role: ## give a user a role: make grant-role EMAIL=you@example.com [ROLE=ops|user] [BY=name]. ops opens the console's ops screens; BY (default $$USER) is kept in user_role_changes
+	docker compose run --rm --no-deps api grant-role --email '$(EMAIL)' --role '$(or $(ROLE),ops)' --by '$(or $(BY),$(USER))'
 
 migrate-version: ## the schema version recorded by golang-migrate
 	docker compose run --rm migrate version

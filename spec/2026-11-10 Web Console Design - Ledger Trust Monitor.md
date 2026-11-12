@@ -275,7 +275,8 @@ Each action sends a fresh `Idempotency-Key` per click. Demo actions are on when 
 The ops screens show every customer's balances and transactions, so they need an authenticated, authorized user. Binding to 127.0.0.1 alone doesn't protect them: any local process can read them, and so can a web page through DNS rebinding.
 
 - **Role:** auth-api's `users` gains `role` (`user` by default, or `ops`; migration 007), returned on `GET /api/v1/users/profile`.
-- **Granting:** only with `auth-api grant-role --email <email> --role ops|user` (`make grant-role EMAIL=… [ROLE=…]`). No API route changes a role, so nobody can grant one to themselves. Each grant logs `user.role_change` (C1) with `user_id`, `role` and `previous_role`, never the email.
+- **Granting:** only with `auth-api grant-role --email <email> --role ops|user --by <operator>` (`make grant-role EMAIL=… [ROLE=…] [BY=…]`; `BY` defaults to `$USER`). No API route changes a role, so nobody can grant one to themselves.
+- **Record of grants:** each change is written to `user_role_changes` (append-only, guarded by a trigger) in the same statement as the change: `user_id`, `role`, `previous_role`, `changed_by`, `changed_at`. It also logs `user.role_change` (C1) with `user_id`, `role` and `previous_role`, never the email or `changed_by`. The table is the record that counts: `grant-role` runs in a one-off container that exits before Alloy can discover it, so the log line may never reach Loki.
 - **Checking:** `ledger-console` reads the caller's profile from auth-api, with the caller's own token, on every `/console/api/ops/*` request and before the 2 s cache. So an ended session or a revoked role takes effect at once.
   - no token, or an ended session: `401 unauthorized`;
   - a user without the ops role: `403 forbidden`;

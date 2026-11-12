@@ -17,12 +17,14 @@ import (
 // fakeRoles records SetRole calls and answers as told.
 type fakeRoles struct {
 	calls    int
+	by       string
 	previous string
 	err      error
 }
 
-func (f *fakeRoles) SetRole(_ context.Context, email, role string) (string, repository.User, error) {
+func (f *fakeRoles) SetRole(_ context.Context, email, role, by string) (string, repository.User, error) {
 	f.calls++
+	f.by = by
 	if f.err != nil {
 		return "", repository.User{}, f.err
 	}
@@ -55,6 +57,7 @@ func oneEvent(t *testing.T, buf *bytes.Buffer) map[string]any {
 func TestSetRole(t *testing.T) {
 	for _, c := range []struct {
 		name     string
+		by       string
 		role     string
 		store    *fakeRoles
 		wantErr  error
@@ -64,15 +67,16 @@ func TestSetRole(t *testing.T) {
 		level    string
 		previous string
 	}{
-		{"grant ops", "ops", &fakeRoles{previous: "user"}, nil, 1, "success", "", "info", "user"},
-		{"back to user", "user", &fakeRoles{previous: "ops"}, nil, 1, "success", "", "info", "ops"},
-		{"unknown role", "admin", &fakeRoles{}, service.ErrInvalidRole, 0, "denied", "invalid_input", "warn", ""},
-		{"unknown email", "ops", &fakeRoles{err: repository.ErrNotFound}, repository.ErrNotFound, 1, "denied", "not_found", "warn", ""},
-		{"database down", "ops", &fakeRoles{err: errors.New("conn refused")}, nil, 1, "failure", "pg_error", "error", ""},
+		{"grant ops", "alice", "ops", &fakeRoles{previous: "user"}, nil, 1, "success", "", "info", "user"},
+		{"back to user", "alice", "user", &fakeRoles{previous: "ops"}, nil, 1, "success", "", "info", "ops"},
+		{"unknown role", "alice", "admin", &fakeRoles{}, service.ErrInvalidRole, 0, "denied", "invalid_input", "warn", ""},
+		{"nobody named as the one granting", " ", "ops", &fakeRoles{}, service.ErrInvalidRole, 0, "denied", "invalid_input", "warn", ""},
+		{"unknown email", "alice", "ops", &fakeRoles{err: repository.ErrNotFound}, repository.ErrNotFound, 1, "denied", "not_found", "warn", ""},
+		{"database down", "alice", "ops", &fakeRoles{err: errors.New("conn refused")}, nil, 1, "failure", "pg_error", "error", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx, buf := roleCtx()
-			u, err := service.NewRoleService(c.store).SetRole(ctx, "ops-person@example.com", c.role)
+			u, err := service.NewRoleService(c.store).SetRole(ctx, "ops-person@example.com", c.role, c.by)
 			switch {
 			case c.outcome == "success" && (err != nil || u.Role != c.role):
 				t.Fatalf("SetRole = %+v, %v", u, err)
@@ -83,6 +87,9 @@ func TestSetRole(t *testing.T) {
 			}
 			if c.store.calls != c.calls {
 				t.Fatalf("store called %d times, want %d", c.store.calls, c.calls)
+			}
+			if c.calls == 1 && c.store.by != c.by {
+				t.Fatalf("store got by=%q, want %q", c.store.by, c.by)
 			}
 			ev := oneEvent(t, buf)
 			if ev["outcome"] != c.outcome || ev["level"] != c.level || (c.reason != "" && ev["reason"] != c.reason) {
