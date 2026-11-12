@@ -51,3 +51,56 @@ export type Monitor = {
   handled: { label: Label | 'refused_try_again'; count: number }[];
   self_healing: { at: string; text: string }[] | null;
 };
+
+export type Signals = { available: boolean };
+
+// One step of a transaction's audit trail: from the ledger's permanent record
+// or from the logs.
+export type TimelineEntry = {
+  at: string;
+  kind: 'ok' | 'recovered' | 'refused' | 'info';
+  title: string;
+  detail?: string;
+  source: 'ledger' | 'logs';
+};
+
+export type JournalLine = {
+  id: string;
+  ledger_id: string;
+  ledger_kind: 'USER' | 'SYSTEM';
+  ledger_code?: string;
+  account_id?: string;
+  amount: number; // signed: the two lines of a transaction sum to 0
+  currency: string;
+  balance_after?: number;
+};
+
+export type TransactionDetail = {
+  transaction: OpsTx;
+  label: { label: Label; what: string; attention: boolean };
+  timeline: TimelineEntry[];
+  journal: JournalLine[];
+  reversed_by?: string;
+  explore_url?: string;
+  signals: Signals;
+};
+
+export type TxPage = { transactions: FeedItem[]; next_cursor?: string; signals: Signals };
+
+export type Account = {
+  id: string;
+  user_id: string;
+  status: 'ACTIVE' | 'FROZEN';
+  ledgers: { id: string; currency: string; balance: number }[];
+  created_at: string;
+};
+
+export type AccountEvent = {
+  type: 'AccountOpened' | 'LedgerOpened' | 'AccountFrozen' | 'AccountUnfrozen' | string;
+  payload: { actor?: string; rule?: string; currency?: string };
+  occurred_at: string;
+};
+
+export type AccountPage = { accounts: Account[]; next_cursor?: string };
+
+export type AccountDetail = TxPage & { account: Account; events: AccountEvent[] };

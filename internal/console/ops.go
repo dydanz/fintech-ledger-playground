@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -34,13 +35,17 @@ const (
 	opsCacheTTL     = 2 * time.Second
 	feedSize        = 50
 	healingSize     = 20
+	accountPageSize = 20
 )
 
 // OpsConfig is what the ops routes need besides ledger-api.
 type OpsConfig struct {
-	ReadToken string           // CONSOLE_READ_TOKEN: ledger-api's read operation; never logged
-	Loki      *Loki            // nil: no activity signals
-	Now       func() time.Time // tests; nil means time.Now
+	ReadToken string // CONSOLE_READ_TOKEN: ledger-api's read operation; never logged
+	Loki      *Loki  // nil: no activity signals
+	// GrafanaURL is Grafana as the browser reaches it (CONSOLE_GRAFANA_URL),
+	// for the trace id's Explore link; "" leaves the link out.
+	GrafanaURL string
+	Now        func() time.Time // tests; nil means time.Now
 }
 
 type ops struct {
@@ -563,8 +568,16 @@ func (o *ops) transaction(c *gin.Context) {
 		}
 		tx := d.Transaction
 		var tl []TimelineEntry
+		reversedBy := ""
 		for _, e := range d.Events {
 			tl = append(tl, eventEntry(e.Type, e.Payload, e.OccurredAt))
+			if e.Type == "TransactionVoided" {
+				var p struct {
+					VoidID string `json:"void_transaction_id"`
+				}
+				_ = json.Unmarshal(e.Payload, &p)
+				reversedBy = p.VoidID
+			}
 		}
 		published, waiting := time.Time{}, 0
 		for _, ob := range d.Outbox {
@@ -603,12 +616,22 @@ func (o *ops) transaction(c *gin.Context) {
 			if err := g.Wait(); err != nil {
 				available = false
 			} else {
+				// The LogQL filters on the id; checking it again keeps a
+				// loose match from labelling the wrong transaction.
 				for _, ln := range recov {
+					if ln.Fields["transaction_id"] != tx.ID {
+						continue
+					}
 					recovered = true
-					tl = append(tl, TimelineEntry{At: ln.At, Kind: "recovered", Title: "Recovery job picked it up",
-						Detail: "The request couldn't finish on its own (for example, the database went away mid-way); the sweeper completed it", Source: "logs"})
+					// ledger.recover is logged once the sweeper has finished, so
+					// this step follows the processing and settle it ran.
+					tl = append(tl, TimelineEntry{At: ln.At, Kind: "recovered", Title: "Completed by the recovery job",
+						Detail: "The request couldn't finish on its own (for example, the database went away mid-way), so the recovery job ran the steps above", Source: "logs"})
 				}
 				for _, ln := range fraud {
+					if ln.Fields["transaction_id"] != tx.ID {
+						continue
+					}
 					rule, _ := ln.Fields["rule"].(string)
 					tl = append(tl, TimelineEntry{At: ln.At, Kind: "info", Title: "Fraud engine asked to freeze the account",
 						Detail: "This transaction triggered rule " + rule + " (the account may already have been frozen)", Source: "logs"})
@@ -623,9 +646,36 @@ func (o *ops) transaction(c *gin.Context) {
 			}
 		}
 		sort.SliceStable(tl, func(i, j int) bool { return tl[i].At.Before(tl[j].At) })
-		return gin.H{"transaction": tx, "label": LabelOf(tx.Tx, recovered, now), "timeline": tl, "journal": d.Journal,
-			"signals": Signals{Available: available}}, nil
+		res := gin.H{"transaction": tx, "label": LabelOf(tx.Tx, recovered, now), "timeline": tl, "journal": d.Journal,
+			"signals": Signals{Available: available}}
+		if reversedBy != "" {
+			res["reversed_by"] = reversedBy
+		}
+		if u := o.exploreURL(tx); u != "" {
+			res["explore_url"] = u
+		}
+		return res, nil
 	})
+}
+
+var traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// exploreURL opens Grafana Explore on every service's log lines carrying the
+// transaction's trace id, from a minute before it was created to 30 minutes
+// after its last change (the recovery job, the fraud engine). "" without a
+// Grafana URL or a well-formed trace id (it goes into LogQL).
+func (o *ops) exploreURL(tx OpsTx) string {
+	if o.cfg.GrafanaURL == "" || !traceIDPattern.MatchString(tx.TraceID) {
+		return ""
+	}
+	ms := func(t time.Time) string { return fmt.Sprint(t.UnixMilli()) }
+	panes, _ := json.Marshal(map[string]any{"tx": map[string]any{
+		"datasource": "loki",
+		"queries": []map[string]any{{"refId": "A", "datasource": map[string]string{"type": "loki", "uid": "loki"},
+			"expr": `{service=~".+"} |= "` + tx.TraceID + `"`}},
+		"range": map[string]string{"from": ms(tx.CreatedAt.Add(-time.Minute)), "to": ms(tx.UpdatedAt.Add(30 * time.Minute))},
+	}})
+	return o.cfg.GrafanaURL + "/explore?" + url.Values{"schemaVersion": {"1"}, "orgId": {"1"}, "panes": {string(panes)}}.Encode()
 }
 
 // eventEntry describes one ledger event, from its type and payload.
@@ -678,9 +728,11 @@ func (o *ops) accounts(c *gin.Context) {
 	})
 }
 
-// account is GET /console/api/ops/accounts/:id: the account and its events.
+// account is GET /console/api/ops/accounts/:id?cursor=: the account, its
+// events, and a page of its transactions (newest first), labelled.
 func (o *ops) account(c *gin.Context) {
 	o.cached(c, func(ctx context.Context) (any, error) {
+		now := o.now().UTC()
 		id := url.PathEscape(c.Param("id"))
 		var acct struct {
 			Account json.RawMessage `json:"account"`
@@ -688,13 +740,29 @@ func (o *ops) account(c *gin.Context) {
 		var ev struct {
 			Events json.RawMessage `json:"events"`
 		}
+		var page struct {
+			Transactions []OpsTx `json:"transactions"`
+			NextCursor   string  `json:"next_cursor,omitempty"`
+		}
+		q := url.Values{"limit": {fmt.Sprint(accountPageSize)}}
+		if v := c.Query("cursor"); v != "" {
+			q.Set("cursor", v)
+		}
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() error { return o.read(gctx, "/internal/v1/accounts/"+id, &acct) })
 		g.Go(func() error { return o.read(gctx, "/internal/v1/accounts/"+id+"/events", &ev) })
+		g.Go(func() error { return o.read(gctx, "/internal/v1/accounts/"+id+"/transactions?"+q.Encode(), &page) })
 		if err := g.Wait(); err != nil {
 			return nil, err
 		}
-		return gin.H{"account": acct.Account, "events": ev.Events}, nil
+		recovered := o.recoveredAmong(ctx, page.Transactions, now)
+		items := []FeedItem{}
+		for _, tx := range page.Transactions {
+			_, rec := recovered[tx.ID]
+			items = append(items, FeedItem{Transaction: tx, Labelled: LabelOf(tx.Tx, rec, now)})
+		}
+		return gin.H{"account": acct.Account, "events": ev.Events, "transactions": items, "next_cursor": page.NextCursor,
+			"signals": Signals{Available: recovered != nil}}, nil
 	})
 }
 

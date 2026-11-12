@@ -38,6 +38,7 @@ func NewLedgerRouter(d LedgerDeps) (*gin.Engine, error) {
 			ops := &opsHandlers{ops: d.Ops, LedgerHandlers: h}
 			internal.GET("/accounts", need("read"), ops.Accounts) // ?user_id= keeps FindAccount
 			internal.GET("/accounts/:account_id/events", need("read"), ops.AccountEvents)
+			internal.GET("/accounts/:account_id/transactions", need("read"), ops.AccountTransactions)
 			internal.GET("/transactions", need("read"), ops.Transactions)
 			internal.GET("/transactions/:transaction_id/detail", need("read"), ops.TransactionDetail)
 			internal.GET("/stats", need("read"), ops.Stats)

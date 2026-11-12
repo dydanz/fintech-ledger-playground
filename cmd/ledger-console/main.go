@@ -58,7 +58,7 @@ func run(cfg config.ConsoleConfig, log *slog.Logger) error {
 		Auth:   console.Upstream{Name: "auth-api", BaseURL: cfg.AuthAPIURL},
 		Ledger: console.Upstream{Name: "ledger-api", BaseURL: cfg.LedgerAPIURL},
 		Demo:   console.DemoConfig{Enabled: cfg.DemoActions, OnboardingToken: cfg.OnboardingToken, PaymentsToken: cfg.PaymentsToken},
-		Ops:    console.OpsConfig{ReadToken: cfg.ReadToken, Loki: loki}})
+		Ops:    console.OpsConfig{ReadToken: cfg.ReadToken, Loki: loki, GrafanaURL: cfg.GrafanaURL}})
 	if err != nil {
 		return err
 	}

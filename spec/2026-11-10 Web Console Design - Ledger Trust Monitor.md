@@ -129,9 +129,17 @@ The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026
   - for a VOID or a voided transaction, the original or the void, linked.
 - **Never shown:** `reference` and `metadata`, which are caller-supplied free text (TRD §11).
 
+*Decided in C3.3:*
+- **Double entry in plain words:** the two signed lines are shown as "money in" and "money out" per ledger, with the totals and a line saying they're equal. If they ever weren't, the screen says so in red.
+- **The Grafana link** uses `CONSOLE_GRAFANA_URL`, Grafana as the browser reaches it (default `http://localhost:3000` in compose). It opens Explore on every service's lines containing the trace id, from a minute before the transaction to 30 minutes after its last change. There's no link without the setting or a well-formed trace id.
+- **A voided original links to its void** (from its `TransactionVoided` event), and a void links to its original.
+- The timeline refreshes every 5 s while the transaction is still in progress.
+
 ### 5.3 Accounts (`/accounts`, `/accounts/:id`)
 
 A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance per currency, and last activity. An account's page shows its balances, its status history (frozen and unfrozen, by whom, under which rule) and its transactions.
+
+*Decided in C3.3:* the list shows when the account was opened instead of its last activity, which ledger-api's account list doesn't carry (a per-row query would be needed). The status history is the account's event stream, newest first; the freeze reason an operator typed is never in it. Transactions page 20 at a time, labelled like the Monitor's feed. Without the log signals, the Transactions list and the account page say that recovered transactions show as Normal (the recovery is known only from the logs); the outcome from the ledger is still correct.
 
 ### 5.4 Auth and My account (`/login`, `/register`, `/profile`, `/me`)
 
@@ -229,6 +237,7 @@ The thresholds above (30 s, 5 s) are starting values for the builder to tune aga
 | `GET /internal/v1/accounts?limit=&cursor=` | accounts with status and balances, keyset-paged |
 | `GET /internal/v1/transactions?limit=&cursor=&status=&type=&since=` | transactions across accounts, newest change first (on the existing `transactions_updated_idx`) |
 | `GET /internal/v1/transactions/:id/detail` | the transaction, its event stream (type, version, `occurred_at`, payload without `reference`/`metadata`), its journal lines, and its outbox `published_at` |
+| `GET /internal/v1/accounts/:id/transactions?limit=&cursor=` | *Added in C3.3:* the account's transactions, newest first, on the existing `transactions_account_created_idx` (the cross-account list has no account filter) |
 | `GET /internal/v1/accounts/:id/events` | the account's event stream (opened, frozen, unfrozen, with actor and rule). *Changed in C1.2:* the freeze and unfreeze `reason` is left out, because it's free text an operator typed |
 | `GET /internal/v1/stats?since=` | counts by type, status and failure reason; outbox pending and oldest age; the PENDING count and the oldest age (*changed in C1.2:* PROCESSING is never committed, since Tx2 passes through it inside one database transaction, so it isn't counted) |
 

@@ -67,3 +67,18 @@ button.pill.on { border-color: var(--ink); color: var(--ink); font-weight: 600; 
 .bars i { display: block; height: 10px; border-radius: 4px; }
 .healing li { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .healing .when { color: var(--muted); margin-right: 10px; font-variant-numeric: tabular-nums; }
+/* Transaction and Account (D§5.2, §5.3) */
+.timeline { list-style: none; margin: 0; padding: 0 0 0 18px; border-left: 2px solid var(--line); }
+.timeline li { position: relative; margin: 0 0 14px; }
+.timeline li:before { content: ""; position: absolute; left: -25px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.timeline li.ok:before { background: var(--ok); } .timeline li.rec:before { background: var(--info); }
+.timeline li.bad:before { background: var(--bad); } .timeline li.info:before { background: var(--muted); }
+.timeline .t { font-weight: 600; } .timeline .when { color: var(--muted); font-size: 12px; }
+.source { font-size: 11px; border-radius: 999px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
+.source.ledger { background: var(--okbg); color: var(--ok); } .source.logs { background: var(--infobg); color: var(--info); }
+tr.total td { font-weight: 600; border-bottom: 0; }
+.spaced-card { margin-top: 16px; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+.facts dt { color: var(--muted); } .facts dd { margin: 0; word-break: break-all; }
+label.inline { font-size: 13px; color: var(--muted); } label.inline select { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+button.more { margin-top: 10px; background: var(--card); color: var(--ink); border-color: var(--line); }

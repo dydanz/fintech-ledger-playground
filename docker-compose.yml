@@ -137,6 +137,8 @@ services:
       # the activity signals from Loki.
       CONSOLE_READ_TOKEN: ${CONSOLE_READ_TOKEN:-dev-console-token}
       CONSOLE_LOKI_URL: http://loki:3100
+      # Grafana as your browser reaches it: the trace id's Explore link.
+      CONSOLE_GRAFANA_URL: ${CONSOLE_GRAFANA_URL:-http://localhost:3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8090:8090"

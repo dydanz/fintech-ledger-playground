@@ -47,6 +47,7 @@ A failure's `reason` is kept, because it's a fixed code.
 | GET | `/internal/v1/transactions?limit=&cursor=&status=&type=&since=` | `200 {"transactions":[…],"next_cursor"?}` across accounts, **newest change first** (`updated_at`). Filters: `status` (`PENDING`, `SETTLED`, `FAILED`, `VOIDED`), `type` (`CREDIT`, `DEBIT`, `VOID`), `since` (RFC 3339) |
 | GET | `/internal/v1/transactions/:transaction_id/detail` | `200 {"transaction","events","journal","outbox"}`: the event stream, the journal lines with their ledger kind, and each event's outbox row (`published_at` is null until relayed; rows are purged after `OUTBOX_RETENTION`) |
 | GET | `/internal/v1/accounts/:account_id/events` | `200 {"events":[…]}`: opened, ledger opened, frozen and unfrozen events, with `actor` and `rule` |
+| GET | `/internal/v1/accounts/:account_id/transactions?limit=&cursor=` | `200 {"transactions":[…],"next_cursor"}`: the account's transactions, newest first (on `transactions_account_created_idx`), in the ops shape (no `reference` or `metadata`); `404 account_not_found` |
 | GET | `/internal/v1/stats?since=` | `200 {"since","transactions":[{type,status,failure_reason,count}],"pending":{count,oldest_age_ms},"outbox":{pending,oldest_age_ms}}`. `since` defaults to 10 minutes ago, and counts transactions changed since then. "Pending" counts `PENDING` only: `PROCESSING` is never committed, because Tx2 passes through it inside one database transaction |
 
 **Paging:** `limit` is 1–100 (default 20), and the cursor is opaque.
