@@ -11,7 +11,9 @@ a { color: var(--info); }
 .brand { font-size: 16px; }
 .topbar nav a { color: var(--muted); margin-right: 16px; text-decoration: none; }
 .topbar nav a.on { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
-.viewer { margin-left: auto; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+/* The nav takes the free space, so the viewer label and the account links sit at the right with or without the label. */
+.topbar nav { flex: 1; }
+.viewer { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
 .page { padding: 20px 24px; max-width: 1240px; margin: 0 auto; }
 h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
 .sub { color: var(--muted); margin: 0 0 16px; }
