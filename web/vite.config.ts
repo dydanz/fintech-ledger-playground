@@ -6,5 +6,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: { proxy: { '/console/api': 'http://localhost:8090' } },
-  test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'] },
+  // TZ pins clock times in tests; the app shows the viewer's local time.
+  test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], env: { TZ: 'UTC' } },
 });

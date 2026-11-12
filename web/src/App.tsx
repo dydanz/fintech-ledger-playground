@@ -14,7 +14,7 @@ import { setUnauthorizedHandler } from './api/client';
 
 // The screens from spec/2026-11-10 Web Console Design §5. The ops screens
 // (Monitor, Transactions, Accounts) need no login in the MVP; Profile and My
-// account do. The ops screens are placeholders until C3, My account until C2.3.
+// account do. Transactions and Accounts are placeholders until C3.3.
 export function App() {
   const navigate = useNavigate();
   useEffect(() => {

@@ -97,7 +97,7 @@ const statsBody = `{"since":"2026-11-11T07:05:00Z","transactions":[
 	{"type":"DEBIT","status":"SETTLED","failure_reason":"","count":55},
 	{"type":"DEBIT","status":"FAILED","failure_reason":"insufficient_funds","count":4},
 	{"type":"CREDIT","status":"VOIDED","failure_reason":"","count":1}],
-	"pending":{"count":0,"oldest_age_ms":0},"outbox":{"pending":2,"oldest_age_ms":30}}`
+	"pending":{"count":3,"oldest_age_ms":72000},"outbox":{"pending":2,"oldest_age_ms":30}}`
 
 // fakeLokiServer answers the console's queries with a database outage at
 // 07:11:15–07:12:00 (refusals, then writes back), one recovery, a leader
@@ -213,7 +213,8 @@ func TestMonitorMergesTheLedgerAndTheLogs(t *testing.T) {
 	// Tiles: 100 transactions changed in the window, 1,096 refusals.
 	if dig(m, "tiles", "transactions", "count") != float64(100) || dig(m, "tiles", "needed_recovery", "refused") != float64(1096) ||
 		dig(m, "tiles", "needed_recovery", "recovered") != float64(1) || dig(m, "tiles", "reconciler", "status") != "clean" ||
-		dig(m, "tiles", "outbox", "pending") != float64(2) {
+		dig(m, "tiles", "outbox", "pending") != float64(2) ||
+		dig(m, "tiles", "needed_recovery", "still_pending") != float64(3) || dig(m, "tiles", "needed_recovery", "oldest_pending_ms") != float64(72000) {
 		t.Fatalf("tiles = %v", dig(m, "tiles"))
 	}
 	if r := dig(m, "tiles", "handled_correctly", "ratio").(float64); r > 0.1 { // 1,096 refused of 1,196 attempts
