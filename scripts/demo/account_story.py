@@ -79,7 +79,12 @@ def ok(text):
     print(f"    ✓ {text}")
 
 
+failures = 0
+
+
 def no(text):
+    global failures
+    failures += 1
     print(f"    ✗ {text}")
 
 
@@ -91,21 +96,41 @@ def new_key(what):
     return f"sim-{what}-{uuid.uuid4()}"
 
 
-def user_id_for(email):
-    """The user's id, looked up in the stack's Postgres (auth-api has no
-    lookup by email). Read-only."""
-    sql = "SELECT id FROM users WHERE email = :'email'"
+def psql(sql, **params):
+    """Runs one read-only query in the stack's Postgres and returns its rows.
+    Values are passed as psql variables (:'name'), never spliced in."""
+    args = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", os.environ.get("POSTGRES_USER", "auth"),
+            "-d", os.environ.get("POSTGRES_DB", "auth"), "-X", "-q", "-At", "-F", "|"]
+    for k, v in params.items():
+        args += ["-v", f"{k}={v}"]
     try:
-        out = subprocess.run(
-            ["docker", "compose", "exec", "-T", "postgres", "psql", "-U", os.environ.get("POSTGRES_USER", "auth"),
-             "-d", os.environ.get("POSTGRES_DB", "auth"), "-X", "-q", "-At", "-v", f"email={email}"],
-            input=sql + "\n", capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+        out = subprocess.run(args, input=sql + "\n", capture_output=True, text=True, timeout=30, check=True).stdout
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
         sys.exit(f"Couldn't query the stack's Postgres: {e}. Run this from the repo folder with the stack up.")
-    if not out:
+    return [l.split("|") for l in out.splitlines() if l]
+
+
+def user_id_for(email):
+    """The user's id (auth-api has no lookup by email)."""
+    rows = psql("SELECT id FROM users WHERE email = :'email'", email=email)
+    if not rows:
         sys.exit("No user with that email in the local auth-api. Register it in the console first "
                  f"({CONSOLE}/register), then run this again.")
-    return out.splitlines()[0]
+    return rows[0][0]
+
+
+def wait_for_fraud_window(account_id):
+    """The story makes 3 top-ups. The fraud engine freezes an account after
+    more than FRAUD_TOPUP_MAX (3) in FRAUD_TOPUP_WINDOW (5 minutes), so a
+    rerun within 5 minutes would be frozen halfway through. Stop instead."""
+    window = int(os.environ.get("FRAUD_TOPUP_WINDOW_S", "300"))
+    rows = psql("SELECT count(*), coalesce(ceil(extract(epoch FROM max(created_at) + make_interval(secs => :'w') - now())), 0) "
+                "FROM ledger.transactions WHERE account_id = :'a' AND type = 'CREDIT' "
+                "AND created_at > now() - make_interval(secs => :'w')", a=account_id, w=window)
+    n, wait = int(rows[0][0]), int(float(rows[0][1]))
+    if n:
+        sys.exit(f"This account had {n} top-up(s) in the last {window // 60} minutes. The story's 3 more would trip the "
+                 f"fraud engine's top-up limit and freeze it halfway. Run it again in {wait} s, or use another user.")
 
 
 def account_of(user_id):
@@ -190,6 +215,7 @@ def main():
     aid = acct["id"]
     if acct.get("status") == "FROZEN":
         sys.exit("The account is frozen. Unfreeze it first, or use another user.")
+    wait_for_fraud_window(aid)
     start = balance(aid)
     say(f"User …{uid[-4:]}  account {aid}  ({'opened just now' if opened else 'already open'})")
     say(f"Starting balance: {money(start)}")
@@ -274,6 +300,8 @@ def main():
     if s == 201:
         involved.append(tx["id"])
         ok(f"{tx['status']}. Balance after: {money(tx['balance_after'])}")
+    else:
+        no(f"Unexpected: {s} {refusal(body)}")
 
     step("The card issuer charges back the IDR 200,000 top-up (stolen card). Ops tries to reverse it.")
     s, _, body = void(card["id"], "card chargeback: issuer reports a stolen card")
@@ -345,6 +373,8 @@ def main():
     for tid in involved[:3]:
         say(f"  {CONSOLE}/transactions/{tid}")
     say(f"  …and the rest on the account page, or live on {CONSOLE}/")
+    if failures:
+        sys.exit(f"\n{failures} step(s) didn't go as the story expects (marked ✗ above).")
 
 
 if __name__ == "__main__":
