@@ -7,6 +7,8 @@ A Go/Gin playground for reliable money movement, with structured JSON logs shipp
 - **ledger-worker:** an outbox relay to Kafka, plus the sweeper, the reconciler, partition maintenance and a write-once archiver.
 - **fraud-engine:** consumes ledger events from Kafka and freezes accounts on velocity rules.
 
+A web console, **ledger-console**, shows whether money is being handled correctly right now, what went wrong, and how the system recovered.
+
 The design is in [`spec/`](spec/): the BRD, the TRD and the development plan.
 
 ## Quick start
@@ -16,14 +18,34 @@ cp .env.example .env      # optional: override the dev passwords
 make up                   # build and start everything (docker compose)
 make smoke                # auth: register -> login -> profile -> logout -> 401
 make smoke-ledger         # ledger: open -> credit -> debit -> NSF -> replay -> freeze
+make smoke-console        # the console's API end to end
 ```
+
+Then open the console:
+
+1. Register at http://localhost:8090/register (any email; nothing is sent).
+2. `make grant-role EMAIL=you@example.com` gives that user the ops role, for the **Monitor**, **Transactions** and **Accounts** screens. Reload the page.
+3. **My account** opens a demo account and moves money. More than 3 top-ups in 5 minutes and the fraud engine freezes it.
 
 | Service | URL |
 | :--- | :--- |
 | auth-api | http://localhost:8080 |
 | ledger-api | http://localhost:8081 (127.0.0.1 only) |
-| Web console | http://localhost:8090 (127.0.0.1 only; being built, see the [design](<spec/2026-11-10 Web Console Design - Ledger Trust Monitor.md>)) |
+| Web console | http://localhost:8090 (127.0.0.1 only): Monitor, Transactions, Accounts (ops role), My account. See the [Operations Guide §6](<spec/2026-11-10 Operations Guide.md#6-web-console>) |
 | Grafana | http://localhost:3000 (admin / admin): dashboards **auth-api overview** and **ledger overview** |
+
+## Watch the system recover
+
+On a throwaway stack (stop the default one first with `make down`: they use the same ports), with the Monitor open in your browser:
+
+```bash
+export COMPOSE_PROJECT_NAME=chaos
+make load-up                           # fraud thresholds out of the way
+make grant-role EMAIL=you@example.com  # after registering at http://localhost:8090/register
+make chaos FAULT=postgres              # or kafka, redis, worker
+```
+
+The Monitor shows the incident and, once it's over, what was refused and what the recovery job completed. (In a Postgres drill, the ops screens can't load until the database is back; see [#67](https://github.com/dydanz/fintech-ledger-playground/issues/67).) The drill's `chaos-results/<run>-<fault>/report.txt` checks the same thing from the client's side. The screenshots in [`examples/console/`](examples/console/) come from these drills, and the [Operations Guide §6.6](<spec/2026-11-10 Operations Guide.md#66-watching-a-chaos-drill>) walks through them. `make down` (with the same `COMPOSE_PROJECT_NAME`) stops it.
 
 ## How it fits together
 
@@ -32,6 +54,8 @@ client ──► auth-api ──► Redis (sessions) + Postgres (audit)
 service ─► ledger-api ─► Postgres: events + journal + outbox, in one transaction
                           │
            ledger-worker ─┴─► Kafka ledger.events.v1 ──► fraud-engine ──► freeze via ledger-api
+
+browser ─► ledger-console ─► auth-api, ledger-api (reads), Loki (what happened)
 ```
 
 - **Postgres is the authority.** Redis caches sessions and idempotent responses, and Kafka is a feed filled from the transactional outbox (at-least-once; consumers deduplicate on `event_id`).

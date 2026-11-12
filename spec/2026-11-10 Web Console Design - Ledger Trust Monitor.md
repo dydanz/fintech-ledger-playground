@@ -1,6 +1,6 @@
 # Web Console Design: Ledger Trust Monitor
 
-**Status:** draft, MVP · **Date:** 2026-11-10 · **Framework:** React
+**Status:** implemented (C1–C3, PRs #47–#56); the decisions changed while building are marked *Changed* or *Decided* in place · **Date:** 2026-11-10 · **Framework:** React
 
 ## 1. Why
 
@@ -289,6 +289,14 @@ The ops screens show every customer's balances and transactions, so they need an
 ## 8. Delivery (one PR each)
 
 The [Development Plan](<2026-11-10 Development Plan - Web Console.md>) breaks this into four phases (C1–C4) and nine PRs, with tests and acceptance per PR. Where the two differ, the plan is current.
+
+*As built:*
+- **C1:** [#47](https://github.com/dydanz/fintech-ledger-playground/pull/47) (password change) and [#48](https://github.com/dydanz/fintech-ledger-playground/pull/48) (ops read routes).
+- **C2:** [#49](https://github.com/dydanz/fintech-ledger-playground/pull/49), [#50](https://github.com/dydanz/fintech-ledger-playground/pull/50) and [#51](https://github.com/dydanz/fintech-ledger-playground/pull/51) (the service, auth pages, My account).
+- **C3:** [#52](https://github.com/dydanz/fintech-ledger-playground/pull/52) (labels and incidents), [#53](https://github.com/dydanz/fintech-ledger-playground/pull/53) (Monitor) and [#54](https://github.com/dydanz/fintech-ledger-playground/pull/54) (Transaction, Accounts).
+- **After C3:** [#56](https://github.com/dydanz/fintech-ledger-playground/pull/56) (the ops role), plus the follow-ups in [#55](https://github.com/dydanz/fintech-ledger-playground/issues/55) and [#46](https://github.com/dydanz/fintech-ledger-playground/issues/46).
+
+The original list below is kept for reference.
 
 1. `feat/auth-password-change`: §7.1.
 2. `feat/ledger-ops-read-routes`: §7.2.
