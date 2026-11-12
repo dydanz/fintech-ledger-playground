@@ -111,7 +111,10 @@ func TestIncidentKafkaFromTheDrill(t *testing.T) {
 	if k.Count != 22 || k.PeakLagMs < 287000 {
 		t.Fatalf("count %d, peak lag %v; want 22 failed publishes and the 287 s peak", k.Count, k.PeakLagMs)
 	}
-	if !strings.Contains(k.Text, "delivered") || !strings.Contains(k.Title, "Kafka") {
+	// outbox.lag is sampled every 30 s, so the peak is a lower bound and the
+	// end an upper one: the text says "at least" and "within", never "for".
+	if !strings.Contains(k.Text, "delivered within 5 min 15 s of the first failure") || !strings.Contains(k.Text, "oldest waited at least") ||
+		strings.Contains(k.Text, "down for") || !strings.Contains(k.Title, "Kafka") {
 		t.Fatalf("resolved text = %q / %q", k.Title, k.Text)
 	}
 }
@@ -219,5 +222,28 @@ func TestIncidentDatabaseWithoutRecoveries(t *testing.T) {
 	inc := console.Incidents(b, day.Add(7*time.Hour+13*time.Minute))
 	if len(inc) != 1 || strings.Contains(inc[0].Text, "0 stuck") || !strings.Contains(inc[0].Text, "no payment was left half-done") {
 		t.Fatalf("text = %q", inc[0].Text)
+	}
+}
+
+// The title names what failed, the same while active and once resolved: the
+// screen writes "Incident in progress:" or "Resolved:" around it.
+func TestIncidentTitleNamesTheFailure(t *testing.T) {
+	redis := buckets(at("09:00:00"), at("09:05:00"))
+	for i := 4; i < 8; i++ {
+		redis[i].RedisFailures = 100
+	}
+	for _, c := range []struct {
+		name string
+		inc  []console.Incident
+		want string
+	}{
+		{"kafka resolved", console.Incidents(kafkaBuckets(t), at("10:48:00")), "Kafka unavailable"},
+		{"database resolved", console.Incidents(databaseBuckets(), day.Add(7*time.Hour+13*time.Minute)), "Database unavailable"},
+		{"redis resolved", console.Incidents(redis, at("09:05:00")), "Redis unavailable"},
+		{"redis active", console.Incidents(redis[:8], at("09:01:50")), "Redis unavailable"},
+	} {
+		if len(c.inc) != 1 || c.inc[0].Title != c.want {
+			t.Errorf("%s: incidents %+v, want title %q", c.name, c.inc, c.want)
+		}
 	}
 }

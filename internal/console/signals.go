@@ -87,9 +87,10 @@ func finishKafka(i Incident) Incident {
 	if i.Active {
 		i.Text = "Payments keep working. Events are saved in the ledger's outbox and will be delivered when Kafka is back."
 	} else {
-		i.Text = fmt.Sprintf("Kafka was down for %s. Payments kept working, and every event queued meanwhile was delivered once it was back (oldest waited %s).",
+		// outbox.lag is logged every 30 s: the end is the first healthy sample
+		// (an upper bound) and the peak the worst sample (a lower bound).
+		i.Text = fmt.Sprintf("Payments kept working, and every event queued while Kafka was unavailable was delivered within %s of the first failure (the oldest waited at least %s).",
 			durationWords(i.End.Sub(i.Start)), durationWords(time.Duration(i.PeakLagMs)*time.Millisecond))
-		i.Title = "Resolved: Kafka unavailable"
 	}
 	return i
 }
@@ -136,7 +137,7 @@ func finishDatabase(i Incident, b []Bucket) Incident {
 		}
 	}
 	i.Recovered = n
-	i.Title = "Resolved: database unavailable"
+	i.Title = "Database unavailable"
 	stuck := "no payment was left half-done"
 	if n > 0 {
 		stuck = fmt.Sprintf("%d %s caught mid-way and completed by the recovery job", n, plural(n, "payment was", "payments were"))
@@ -180,12 +181,11 @@ func redisIncidents(b []Bucket, now time.Time) []Incident {
 }
 
 func finishRedis(i Incident) Incident {
+	i.Title = "Redis unavailable"
 	if i.Active {
-		i.Title = "Redis unavailable"
 		i.Text = "Payments keep working without the cache, a little slower; duplicates are still caught by the database."
 		return i
 	}
-	i.Title = "Resolved: Redis unavailable"
 	i.Text = fmt.Sprintf("Redis was down for %s. Payments kept working without the cache.", durationWords(i.End.Sub(i.Start)))
 	return i
 }
