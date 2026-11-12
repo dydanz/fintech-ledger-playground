@@ -19,7 +19,7 @@ const outboxSlowMs = 5_000; // the "outbox lag above 5 s" alert
 export function Monitor() {
   const q = useQuery({
     queryKey: ['ops', 'monitor'],
-    queryFn: () => api<MonitorData>('/ops/monitor'),
+    queryFn: () => api<MonitorData>('/ops/monitor', { auth: true }),
     refetchInterval: POLL_MS,
   });
   const m = q.data;

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,10 +38,51 @@ func main() {
 		os.Exit(1)
 	}
 
+	// `auth-api grant-role --email <email> --role ops|user --by <you>` (make grant-role):
+	// the only way to change a role; no API route does it.
+	if len(os.Args) > 1 && os.Args[1] == "grant-role" {
+		if err := grantRole(cfg, log, os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "grant-role:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := run(cfg, log); err != nil {
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// grantRole sets one user's role. The user.role_change event is logged by
+// the service; the operator sees the outcome on stdout.
+func grantRole(cfg config.Config, log *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("grant-role", flag.ContinueOnError)
+	email := fs.String("email", "", "the user's email")
+	role := fs.String("role", "ops", "ops or user")
+	by := fs.String("by", "", "who is making the change (kept in user_role_changes)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *email == "" {
+		return errors.New("--email is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 2)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	u, err := service.NewRoleService(repository.NewUserRepo(db)).SetRole(logger.WithContext(ctx, log), *email, *role, *by)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return errors.New("no user with that email; register it first")
+	case err != nil:
+		return err
+	}
+	fmt.Printf("user %s now has role %s\n", u.ID, u.Role)
+	return nil
 }
 
 func run(cfg config.Config, log *slog.Logger) error {

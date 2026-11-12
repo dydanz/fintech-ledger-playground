@@ -156,6 +156,15 @@ type SessionLookup interface {
 	Get(ctx context.Context, tokenHash string) (session.Session, error)
 }
 
+// SetUserID records the authenticated user for the rest of the request: the
+// access log and every later log line carry user_id. For services that
+// authenticate a user some other way (ledger-console asks auth-api).
+func SetUserID(c *gin.Context, userID string) {
+	c.Set(ctxUserID, userID)
+	ctx := c.Request.Context()
+	c.Request = c.Request.WithContext(logger.WithContext(ctx, logger.FromContext(ctx).With("user_id", userID)))
+}
+
 // Auth validates "Authorization: Bearer <token>" against Redis and injects
 // the authenticated user ID into the Gin context. PostgreSQL is never hit.
 func Auth(store SessionLookup) gin.HandlerFunc {

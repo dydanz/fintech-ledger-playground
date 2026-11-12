@@ -42,7 +42,7 @@ export function Account() {
   const q = useInfiniteQuery({
     queryKey: ['ops', 'account', id],
     queryFn: ({ pageParam }) =>
-      api<AccountDetail>(`/ops/accounts/${encodeURIComponent(id)}${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ''}`),
+      api<AccountDetail>(`/ops/accounts/${encodeURIComponent(id)}${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ''}`, { auth: true }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
   });

@@ -54,7 +54,7 @@ func run(cfg config.ConsoleConfig, log *slog.Logger) error {
 		loki = console.NewLoki(cfg.LokiURL, 5*time.Second)
 	}
 	gin.SetMode(gin.ReleaseMode)
-	router, err := console.NewRouter(console.Deps{Logger: log, Web: web, TrustedProxies: cfg.TrustedProxies,
+	router, err := console.NewRouter(console.Deps{Logger: log, Web: web, TrustedProxies: cfg.TrustedProxies, AllowedHosts: cfg.AllowedHosts,
 		Auth:   console.Upstream{Name: "auth-api", BaseURL: cfg.AuthAPIURL},
 		Ledger: console.Upstream{Name: "ledger-api", BaseURL: cfg.LedgerAPIURL},
 		Demo:   console.DemoConfig{Enabled: cfg.DemoActions, OnboardingToken: cfg.OnboardingToken, PaymentsToken: cfg.PaymentsToken},

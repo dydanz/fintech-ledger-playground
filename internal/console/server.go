@@ -30,7 +30,11 @@ type Deps struct {
 	Auth           Upstream   // auth-api, for /console/api/auth/*, /profile, /password
 	Ledger         Upstream   // ledger-api, for /console/api/me/*
 	Demo           DemoConfig // the demo money actions on My account
-	Ops            OpsConfig  // the read-only ops routes (needs Ledger and a read token)
+	Ops            OpsConfig  // the read-only ops routes (needs Auth, Ledger and a read token)
+	// AllowedHosts are the Host headers served (CONSOLE_ALLOWED_HOSTS); nil
+	// serves any. Blocks DNS rebinding: a page on another site reaching
+	// 127.0.0.1 still sends its own host.
+	AllowedHosts []string
 }
 
 // Security headers for everything the app is served with. The app makes
@@ -55,6 +59,9 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(d.AllowedHosts) > 0 {
+		r.Use(allowHosts(d.AllowedHosts))
+	}
 	apiGroup := r.Group(APIPrefix)
 	var authProxy, ledgerProxy *proxy
 	if d.Auth.BaseURL != "" {
@@ -69,13 +76,16 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 			apiGroup.Handle(rt.method, rt.path, ledgerProxy.handle(rt))
 		}
 	}
-	if ledgerProxy != nil && d.Ops.ReadToken != "" {
+	// The ops routes need a user with the ops role, so without auth-api
+	// they aren't served at all.
+	if authProxy != nil && ledgerProxy != nil && d.Ops.ReadToken != "" {
 		o := newOps(d.Ops, ledgerProxy)
-		apiGroup.GET("/ops/monitor", o.monitor)
-		apiGroup.GET("/ops/transactions", o.transactions)
-		apiGroup.GET("/ops/transactions/:id", o.transaction)
-		apiGroup.GET("/ops/accounts", o.accounts)
-		apiGroup.GET("/ops/accounts/:id", o.account)
+		opsGroup := apiGroup.Group("/ops", requireOps(authProxy))
+		opsGroup.GET("/monitor", o.monitor)
+		opsGroup.GET("/transactions", o.transactions)
+		opsGroup.GET("/transactions/:id", o.transaction)
+		opsGroup.GET("/accounts", o.accounts)
+		opsGroup.GET("/accounts/:id", o.account)
 	}
 	if authProxy != nil && ledgerProxy != nil {
 		dm := &demo{cfg: d.Demo, auth: authProxy, ledger: ledgerProxy}

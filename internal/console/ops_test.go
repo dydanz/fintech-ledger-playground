@@ -33,6 +33,37 @@ const (
 	traceID     = "4bf92f3577b34da6a3ce929d0e0e4736"
 )
 
+// opsTok is an ops user's session (userTok, from me_test.go, a plain user's).
+const opsTok = "ops-session-token"
+
+// fakeProfiles is auth-api's profile route: opsTok is an ops user, userTok a
+// plain user, anything else an ended session. down answers like a stopped
+// container would be reached: not at all (the test closes the server).
+type fakeProfiles struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *fakeProfiles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path != "/api/v1/users/profile" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	switch r.Header.Get("Authorization") {
+	case "Bearer " + opsTok:
+		_, _ = w.Write([]byte(`{"id":"u-ops","email":"ops@example.com","role":"ops"}`))
+	case "Bearer " + userTok:
+		_, _ = w.Write([]byte(`{"id":"u-user","email":"user@example.com","role":"user"}`))
+	default:
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"unauthorized","message":"invalid or expired token"}}`))
+	}
+}
+
 // fakeLedger answers ledger-api's ops reads and counts them per path.
 type fakeLedger struct {
 	mu    sync.Mutex
@@ -172,6 +203,7 @@ func fakeLokiServer(t *testing.T, up *atomic.Bool) *httptest.Server {
 
 type opsEnv struct {
 	h      http.Handler
+	auth   *fakeProfiles
 	ledger *fakeLedger
 	lokiUp *atomic.Bool
 	now    *time.Time
@@ -186,6 +218,9 @@ func newOpsEnvWith(t *testing.T, edit func(*console.OpsConfig)) *opsEnv {
 	led := &fakeLedger{hits: map[string]int{}, stats: statsBody}
 	ledSrv := httptest.NewServer(led)
 	t.Cleanup(ledSrv.Close)
+	profiles := &fakeProfiles{}
+	authSrv := httptest.NewServer(profiles)
+	t.Cleanup(authSrv.Close)
 	up := &atomic.Bool{}
 	up.Store(true)
 	lokiSrv := fakeLokiServer(t, up)
@@ -198,17 +233,24 @@ func newOpsEnvWith(t *testing.T, edit func(*console.OpsConfig)) *opsEnv {
 		edit(&opsCfg)
 	}
 	r, err := console.NewRouter(console.Deps{Logger: logger.New(logs, slog.LevelDebug, "ledger-console"), Web: builtApp(),
+		Auth:   console.Upstream{Name: "auth-api", BaseURL: authSrv.URL},
 		Ledger: console.Upstream{Name: "ledger-api", BaseURL: ledSrv.URL},
 		Ops:    opsCfg})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &opsEnv{h: r, ledger: led, lokiUp: up, now: &now, logs: logs}
+	return &opsEnv{h: r, auth: profiles, ledger: led, lokiUp: up, now: &now, logs: logs}
 }
 
+// get reads an ops route as an ops user.
 func (e *opsEnv) get(t *testing.T, path string) (int, map[string]any) {
 	t.Helper()
-	w := send(t, e.h, "GET", path, "", "", nil)
+	return e.getAs(t, opsTok, path)
+}
+
+func (e *opsEnv) getAs(t *testing.T, bearer, path string) (int, map[string]any) {
+	t.Helper()
+	w := send(t, e.h, "GET", path, bearer, "", nil)
 	var m map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &m)
 	return w.Code, m
@@ -309,7 +351,7 @@ func TestMonitorWithoutLoki(t *testing.T) {
 func TestMonitorWithoutTheLedgerIs503(t *testing.T) {
 	e := newOpsEnv(t)
 	e.ledger.down = true
-	w := send(t, e.h, "GET", "/console/api/ops/monitor", "", "", nil)
+	w := send(t, e.h, "GET", "/console/api/ops/monitor", opsTok, "", nil)
 	if w.Code != 502 && w.Code != 503 {
 		t.Fatalf("ledger-api failing: %d %s", w.Code, w.Body)
 	}

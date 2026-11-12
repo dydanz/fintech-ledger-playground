@@ -1,16 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { session } from '../auth/session';
 import { ErrorLine } from '../auth/Notice';
-
-type Profile = { id: string; email: string; full_name: string; bio: string };
+import { useProfile, type Profile as ProfileData } from '../auth/useProfile';
 
 export function Profile() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile', { auth: true }) });
+  const profile = useProfile();
 
   const [fullName, setFullName] = useState('');
   const [bio, setBio] = useState('');
@@ -22,7 +21,7 @@ export function Profile() {
   }, [profile.data]);
 
   const save = useMutation({
-    mutationFn: () => api<Profile>('/profile', { method: 'PUT', auth: true, body: { full_name: fullName, bio } }),
+    mutationFn: () => api<ProfileData>('/profile', { method: 'PUT', auth: true, body: { full_name: fullName, bio } }),
     onSuccess: (p) => queryClient.setQueryData(['profile'], p),
   });
 

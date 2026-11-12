@@ -25,6 +25,7 @@ type User struct {
 	PasswordHash string
 	FullName     string
 	Bio          string
+	Role         string // user or ops (migration 007)
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -41,11 +42,11 @@ type UserRepo struct {
 
 func NewUserRepo(db *pgxpool.Pool) *UserRepo { return &UserRepo{db: db} }
 
-const userColumns = `id, email, password_hash, full_name, bio, created_at, updated_at`
+const userColumns = `id, email, password_hash, full_name, bio, role, created_at, updated_at`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Bio, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Bio, &u.Role, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -85,6 +86,31 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (User, error) {
 }
 
 // UpdatePasswordHash replaces the user's bcrypt hash.
+// SetRole sets the role of the user with this email (any case), records the
+// change in user_role_changes in the same statement, and returns the role it
+// had before. by is the operator who ran it. ErrNotFound if there's no such
+// user.
+func (r *UserRepo) SetRole(ctx context.Context, email, role, by string) (string, User, error) {
+	var previous string
+	var u User
+	err := r.db.QueryRow(ctx,
+		`WITH old AS (SELECT id, role FROM users WHERE lower(email) = lower($1) FOR UPDATE),
+		 upd AS (
+		   UPDATE users SET role = $2, updated_at = now() FROM old WHERE users.id = old.id
+		   RETURNING old.role AS previous, users.id, users.email, users.password_hash, users.full_name, users.bio, users.role,
+		             users.created_at, users.updated_at),
+		 audit AS (INSERT INTO user_role_changes (user_id, role, previous_role, changed_by) SELECT id, role, previous, $3 FROM upd)
+		 SELECT previous, id, email, password_hash, full_name, bio, role, created_at, updated_at FROM upd`,
+		email, role, by).Scan(&previous, &u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Bio, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", User{}, ErrNotFound
+	}
+	if err != nil {
+		return "", User{}, fmt.Errorf("set role: %w", err)
+	}
+	return previous, u, nil
+}
+
 func (r *UserRepo) UpdatePasswordHash(ctx context.Context, id, hash string) error {
 	tag, err := r.db.Exec(ctx,
 		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, id, hash)

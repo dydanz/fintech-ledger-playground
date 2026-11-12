@@ -90,7 +90,7 @@ These are the design's D§11 drafting decisions. Each is assumed unless the revi
 | A Go backend serves the SPA and holds the tokens (D§4) | C2.1 | Yes |
 | Recovery and incident signals come from Loki, with no schema change (D§6.1) | C3.1 | Yes |
 | No per-transaction "Retried" label, and no "0 lost" tile (D§6.3) | C3.1 | Yes |
-| Ops screens have no login and are reachable only on 127.0.0.1 (D§2) | C3.2 | Yes, for the MVP. **Revisit before the console runs anywhere but a laptop** |
+| Ops screens have no login and are reachable only on 127.0.0.1 (D§2) | C3.2 | Yes, for the MVP. **Revisited after C3** (`feat/console-ops-role`): the ops screens need the ops role, granted with `make grant-role`, and the console checks the `Host` header (D§7.5) |
 | A password change ends every session, including the current one (D§7.1) | C1.1 | Yes |
 | The user's token is kept in `sessionStorage` (D§5.4) | C2.2 | Yes. An httpOnly cookie session is a later hardening step |
 | Demo actions are on by default in compose, capped at IDR 1,000,000 (D§7.3) | C2.3 | Yes |
