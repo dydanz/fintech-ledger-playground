@@ -623,8 +623,10 @@ func (o *ops) transaction(c *gin.Context) {
 						continue
 					}
 					recovered = true
-					tl = append(tl, TimelineEntry{At: ln.At, Kind: "recovered", Title: "Recovery job picked it up",
-						Detail: "The request couldn't finish on its own (for example, the database went away mid-way); the sweeper completed it", Source: "logs"})
+					// ledger.recover is logged once the sweeper has finished, so
+					// this step follows the processing and settle it ran.
+					tl = append(tl, TimelineEntry{At: ln.At, Kind: "recovered", Title: "Completed by the recovery job",
+						Detail: "The request couldn't finish on its own (for example, the database went away mid-way), so the recovery job ran the steps above", Source: "logs"})
 				}
 				for _, ln := range fraud {
 					if ln.Fields["transaction_id"] != tx.ID {

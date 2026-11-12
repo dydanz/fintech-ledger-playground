@@ -18,7 +18,7 @@ function detail(over: Record<string, unknown> = {}) {
       { at: '2026-11-11T07:12:05Z', kind: 'ok', title: 'Settled: money moved', detail: 'Balance after: 1,180', source: 'ledger' },
       { at: '2026-11-11T07:11:18Z', kind: 'ok', title: 'Request received and saved', detail: 'By payments', source: 'ledger' },
       { at: '2026-11-11T07:12:40Z', kind: 'ok', title: 'Verified by the reconciler', source: 'logs' },
-      { at: '2026-11-11T07:12:04Z', kind: 'recovered', title: 'Recovery job picked it up', source: 'logs' },
+      { at: '2026-11-11T07:12:05.003Z', kind: 'recovered', title: 'Completed by the recovery job', source: 'logs' },
       { at: '2026-11-11T07:12:06Z', kind: 'ok', title: 'Events published to Kafka', source: 'ledger' },
     ],
     journal: [
@@ -49,15 +49,15 @@ describe('Transaction', () => {
     const steps = within(await screen.findByRole('list', { name: 'Timeline' })).getAllByRole('listitem');
     expect(steps.map((s) => within(s).getByTestId('step-title').textContent)).toEqual([
       'Request received and saved',
-      'Recovery job picked it up',
       'Settled: money moved',
+      'Completed by the recovery job',
       'Events published to Kafka',
       'Verified by the reconciler',
     ]);
-    expect(steps.map((s) => s.className)).toEqual(['ok', 'rec', 'ok', 'ok', 'ok']);
+    expect(steps.map((s) => s.className)).toEqual(['ok', 'ok', 'rec', 'ok', 'ok']);
     expect(within(steps[0]).getByText('ledger record')).toBeInTheDocument();
-    expect(within(steps[1]).getByText('logs')).toBeInTheDocument();
-    expect(steps[1]).toHaveTextContent('11 Nov, 07:12:04');
+    expect(within(steps[2]).getByText('logs')).toBeInTheDocument();
+    expect(steps[2]).toHaveTextContent('11 Nov, 07:12:05');
   });
 
   it('shows the double entry with money in equal to money out', async () => {

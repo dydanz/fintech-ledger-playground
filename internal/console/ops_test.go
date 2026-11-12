@@ -155,7 +155,7 @@ func fakeLokiServer(t *testing.T, up *atomic.Bool) *httptest.Server {
 		case strings.Contains(q, `event="ledger.recover"`):
 			// The sweeper's run is what processes and settles the transaction
 			// (created 07:11:00, settled 07:11:47), so it comes just before.
-			res = `{"resultType":"streams","result":[` + line("07:11:46", `{"event":"ledger.recover","outcome":"success","transaction_id":"`+txRecovered+`","age_ms":47000}`, `"service":"ledger-worker"`) + `]}`
+			res = `{"resultType":"streams","result":[` + line("07:11:47", `{"event":"ledger.recover","outcome":"success","transaction_id":"`+txRecovered+`","age_ms":47000}`, `"service":"ledger-worker"`) + `]}`
 		case strings.Contains(q, `event="app.leader"`):
 			res = `{"resultType":"streams","result":[` + line("07:12:02", `{"event":"app.leader","state":"acquired","job":"sweeper"}`, `"service":"ledger-worker","container":"c23-ledger-worker-1"`) + `]}`
 		case strings.Contains(q, `event="ledger.reconcile"`):
@@ -344,8 +344,10 @@ func TestTransactionTimeline(t *testing.T) {
 	for _, s := range dig(m, "timeline").([]any) {
 		titles = append(titles, dig(s, "title").(string)+" ["+dig(s, "source").(string)+"]")
 	}
-	want := []string{"Request received and saved [ledger]", "Recovery job picked it up [logs]", "Processing started [ledger]",
-		"Settled: money moved [ledger]", "Events published to Kafka [ledger]", "Verified by the reconciler [logs]"}
+	// The recovery job logs ledger.recover once it has completed the
+	// transaction, so the step follows the settle (as in the c33 drill).
+	want := []string{"Request received and saved [ledger]", "Processing started [ledger]",
+		"Settled: money moved [ledger]", "Completed by the recovery job [logs]", "Events published to Kafka [ledger]", "Verified by the reconciler [logs]"}
 	if strings.Join(titles, " | ") != strings.Join(want, " | ") {
 		t.Fatalf("timeline =\n  %s\nwant\n  %s", strings.Join(titles, " | "), strings.Join(want, " | "))
 	}
