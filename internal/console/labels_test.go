@@ -26,6 +26,8 @@ func TestLabelOf(t *testing.T) {
 	}{
 		{"normal credit", console.Tx{Type: "CREDIT", Status: "SETTLED", CreatedAt: t0, SettledAt: settledAfter(3 * time.Millisecond)},
 			false, console.LabelNormal, "Settled in 3 ms", false},
+		{"normal, under a millisecond", console.Tx{Type: "DEBIT", Status: "SETTLED", CreatedAt: t0, SettledAt: settledAfter(400 * time.Microsecond)},
+			false, console.LabelNormal, "Settled in under 1 ms", false},
 		{"recovered, then settled", console.Tx{Type: "CREDIT", Status: "SETTLED", CreatedAt: t0, SettledAt: settledAfter(47 * time.Second)},
 			true, console.LabelRecovered, "Completed by the recovery job after the request couldn't finish on its own", false},
 		{"recovered, then refused", console.Tx{Type: "DEBIT", Status: "FAILED", FailureReason: "insufficient_funds", CreatedAt: t0},
