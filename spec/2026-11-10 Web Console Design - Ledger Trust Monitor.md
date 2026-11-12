@@ -83,7 +83,7 @@ The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026
 
 ### 5.1 Monitor (`/`)
 
-**Tiles, for the selected window (default the last 10 minutes; 1 h, 6 h and 24 h selectable):**
+**Tiles, for the last 10 minutes** (*decided in C3.1:* a fixed window, no selector in the MVP; §6.4):
 - **Transactions:** a count, and the rate.
 - **Handled correctly:** the TRD success ratio, `1 − (5xx + processing_timeout) / valid requests`. *Change from the mockup:* the mockup's sub-line "0 lost · 0 duplicated" is dropped, because the server can't prove it live. Instead it shows "0 stuck · 0 timed out".
 - **Needed recovery:** transactions the sweeper completed, plus requests refused during an incident. The sub-line says whether everything has since completed: "0 still pending".
@@ -104,6 +104,11 @@ The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026
 **How it was handled:** bars per label for the window.
 
 **Self-healing activity:** the newest 20 recovery events (§6.4), in plain language.
+
+*Decided in C3.2:*
+- **"0 stuck"** means no PENDING or PROCESSING payment is older than 60 s (NFR-7), from the age of the oldest one. Otherwise the tile reads "3 pending, oldest 1 min 35 s".
+- **Without the log signals** (Loki unreachable), a note says so at the top. Values that only the logs know (recoveries, refusals, the reconciler's result) read "unknown", not 0. No incident banners or self-healing lines are shown. The tiles, feed and bars from the ledger's own data still render.
+- **Refreshing:** every 3 s while the tab is visible; a failed refresh keeps the last answer on screen, with the error above it.
 
 ### 5.2 Transaction (`/transactions/:id`)
 

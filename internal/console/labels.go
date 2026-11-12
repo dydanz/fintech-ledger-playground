@@ -93,9 +93,11 @@ func lowerFirst(s string) string {
 	return strings.ToLower(s[:1]) + strings.ReplaceAll(s[1:], ";", ",")
 }
 
-// shortDuration renders 3 ms, 1.2 s or 47 s.
+// shortDuration renders under 1 ms, 3 ms, 1.2 s or 47 s.
 func shortDuration(d time.Duration) string {
 	switch {
+	case d < time.Millisecond:
+		return "under 1 ms"
 	case d < time.Second:
 		return fmt.Sprintf("%d ms", d.Milliseconds())
 	case d < 10*time.Second:

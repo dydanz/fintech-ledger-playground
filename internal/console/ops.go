@@ -188,6 +188,7 @@ type Monitor struct {
 			Recovered    int   `json:"recovered"`
 			Refused      int   `json:"refused"`
 			StillPending int64 `json:"still_pending"`
+			OldestMs     int64 `json:"oldest_pending_ms"` // over stuckAfter: the recovery job has work to do
 		} `json:"needed_recovery"`
 		Reconciler Reconcile `json:"reconciler"`
 		Outbox     struct {
@@ -418,6 +419,7 @@ func buildMonitor(now time.Time, st stats, txs []OpsTx, sig gathered, available 
 		t.HandledCorrectly.Ratio = 1 - float64(t.HandledCorrectly.SystemFailures)/float64(t.HandledCorrectly.Valid)
 	}
 	t.NeededRecovery.Recovered, t.NeededRecovery.Refused, t.NeededRecovery.StillPending = recovered, refused, st.Pending.Count
+	t.NeededRecovery.OldestMs = st.Pending.OldestAgeMs
 	t.Reconciler = sig.reconcile
 	if !available {
 		t.Reconciler = Reconcile{Status: "unknown"}

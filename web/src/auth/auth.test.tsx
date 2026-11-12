@@ -160,8 +160,11 @@ describe('logout', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Log out' }));
     await heading('Log in');
     expect(sessionStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(calls[0]).toMatchObject({ method: 'POST', path: '/auth/logout' });
-    expect(calls[0].headers.Authorization).toBe('Bearer tok-1');
+    const logout = calls.find((c) => c.path === '/auth/logout');
+    expect(logout).toMatchObject({ method: 'POST' });
+    expect(logout?.headers.Authorization).toBe('Bearer tok-1');
+    // The Monitor at / polls the ops API, which never gets the user's token.
+    expect(calls.filter((c) => c.path.startsWith('/ops/')).every((c) => !c.headers.Authorization)).toBe(true);
   });
 
   it('still ends the session here when auth-api is unreachable', async () => {
