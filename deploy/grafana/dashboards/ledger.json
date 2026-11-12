@@ -293,7 +293,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Idempotency cache unavailable: Redis calls falling back to Postgres",
+      "title": "Idempotency cache outages: Redis down, writes on Postgres (one line per outage; recovery shows as success)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -311,7 +311,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (operation, reason) (count_over_time({service=\"ledger-api\"} | json | event=\"dependency.call\" | dependency=\"redis\" [5m]))",
+          "expr": "sum by (outcome, operation, reason) (count_over_time({service=\"ledger-api\"} | json | event=\"dependency.call\" | dependency=\"redis\" [5m]))",
           "legendFormat": "{{operation}} {{reason}}"
         }
       ],

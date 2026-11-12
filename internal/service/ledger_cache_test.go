@@ -138,8 +138,8 @@ func TestRedisDownWritesStillCorrect(t *testing.T) {
 			}
 		}
 	}
-	if warns != 2 { // the fast-path get and the post-commit set
-		t.Fatalf("want 2 dependency.call warnings, got %d:\n%s", warns, e.logs)
+	if warns != 1 { // the fast-path get; then the cache is skipped (#60)
+		t.Fatalf("want 1 dependency.call warning, got %d:\n%s", warns, e.logs)
 	}
 	if strings.Contains(e.logs.String(), "cr-down") {
 		t.Fatal("raw Idempotency-Key logged")
