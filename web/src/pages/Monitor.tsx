@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { ErrorLine } from '../auth/Notice';
-import { LabelChip, labelName } from '../ops/LabelChip';
-import { between, clock, duration, money, num, percent, shortId } from '../ops/format';
+import { labelName } from '../ops/LabelChip';
+import { TxTable } from '../ops/TxTable';
+import { between, clock, duration, num, percent } from '../ops/format';
 import type { FeedItem, Incident, Label, Monitor as MonitorData } from '../ops/types';
 
 // POLL_MS is how often the Monitor refreshes while its tab is visible
@@ -144,7 +144,6 @@ function Incidents({ incidents, now }: { incidents: Incident[]; now: string }) {
 }
 
 const labels = Object.keys(labelName) as Label[];
-const typeName = { CREDIT: 'Credit', DEBIT: 'Debit', VOID: 'Void' };
 
 function Feed({ feed }: { feed: FeedItem[] }) {
   const [only, setOnly] = useState<Label | null>(null);
@@ -161,36 +160,7 @@ function Feed({ feed }: { feed: FeedItem[] }) {
         {filter(null, 'All', feed.length)}
         {labels.map((l) => filter(l, labelName[l], feed.filter((f) => f.label === l).length))}
       </div>
-      <table aria-label="Live transactions">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Account</th>
-            <th>Type</th>
-            <th className="num">Amount</th>
-            <th>Outcome</th>
-            <th>What happened</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map(({ transaction: t, label, what, attention }) => (
-            <tr key={t.id}>
-              <td>{clock(t.updated_at)}</td>
-              <td className="mono" title={t.account_id}>
-                {shortId(t.account_id)}
-              </td>
-              <td>{typeName[t.type]}</td>
-              <td className="num">{money(t.amount, t.currency)}</td>
-              <td>
-                <LabelChip label={label} attention={attention} />
-              </td>
-              <td>
-                <Link to={`/transactions/${t.id}`}>{what}</Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <TxTable label="Live transactions" items={shown} />
       {feed.length === 0 && <p className="sub">No transactions yet.</p>}
       {feed.length > 0 && shown.length === 0 && (
         <p className="sub">

@@ -84,6 +84,20 @@ func (h *opsHandlers) AccountEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"events": ev})
 }
 
+// GET /internal/v1/accounts/:account_id/transactions?limit=&cursor=
+func (h *opsHandlers) AccountTransactions(c *gin.Context) {
+	limit, ok := queryLimit(c)
+	if !ok {
+		return
+	}
+	page, err := h.ops.AccountTransactions(c.Request.Context(), c.Param("account_id"), limit, c.Query("cursor"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}
+
 // GET /internal/v1/stats?since=
 func (h *opsHandlers) Stats(c *gin.Context) {
 	s, err := h.ops.Stats(c.Request.Context(), c.Query("since"))

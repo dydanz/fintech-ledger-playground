@@ -89,7 +89,8 @@ describe('Monitor', () => {
     ]);
     expect(rows()[2]).toHaveTextContent('IDR 900');
     expect(rows()[2]).toHaveTextContent('…0-j1'); // the account id's last 4 characters
-    expect(within(rows()[1]).getByRole('link')).toHaveAttribute('href', '/transactions/r1');
+    expect(within(rows()[1]).getByRole('link', { name: /Completed by the recovery job/ })).toHaveAttribute('href', '/transactions/r1');
+    expect(within(rows()[1]).getByRole('link', { name: '…0-r1' })).toHaveAttribute('href', '/accounts/acc-0000-r1');
   });
 
   it('filters the feed by label', async () => {

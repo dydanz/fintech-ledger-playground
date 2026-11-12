@@ -270,6 +270,77 @@ func TestOpsDetailOmitsFreeText(t *testing.T) {
 	}
 }
 
+// An account's transactions page newest first, hold only that account's
+// rows, and carry no caller free text.
+func TestOpsAccountTransactions(t *testing.T) {
+	h := newOpsHarness(t)
+	var other string
+	if err := h.pool.QueryRow(context.Background(), `INSERT INTO users (email, password_hash) VALUES ('ops2@x.io', 'x') RETURNING id`).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	w := h.do("POST", "/internal/v1/accounts", opsToken, "open-other", `{"user_id":"`+other+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("open other: %d %s", w.Code, w.Body)
+	}
+	otherAcct := field(t, w, "account", "id").(string)
+	if w := h.do("POST", "/internal/v1/accounts/"+otherAcct+"/credits", payToken, "o-1", `{"amount":5,"currency":"IDR"}`); w.Code != http.StatusCreated {
+		t.Fatalf("credit other: %d %s", w.Code, w.Body)
+	}
+	var want []string
+	for i := range 12 {
+		want = append(want, h.credit(fmt.Sprintf("a-%d", i), 100+i, `,"reference":"INV-secret-123","metadata":{"note":"private-note"}`))
+	}
+	var got []string
+	cursor, pages := "", 0
+	for {
+		q := "limit=5"
+		if cursor != "" {
+			q += "&cursor=" + url.QueryEscape(cursor)
+		}
+		w := h.do("GET", "/internal/v1/accounts/"+h.acct+"/transactions?"+q, opsToken, "", "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("page %d: %d %s", pages, w.Code, w.Body)
+		}
+		for _, secret := range []string{"INV-secret-123", "private-note", `"reference"`, `"metadata"`} {
+			if strings.Contains(w.Body.String(), secret) {
+				t.Fatalf("page contains %s:\n%s", secret, w.Body)
+			}
+		}
+		pages++
+		for _, tx := range field(t, w, "transactions").([]any) {
+			m := tx.(map[string]any)
+			if m["account_id"] != h.acct || m["requested_by"] != "payments" {
+				t.Fatalf("row = %v", m)
+			}
+			got = append(got, m["id"].(string))
+		}
+		next, _ := field(t, w, "next_cursor").(string)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	if pages != 3 || len(got) != 12 {
+		t.Fatalf("%d pages, %d rows; want 3 and 12", pages, len(got))
+	}
+	for i, id := range got { // newest first
+		if id != want[len(want)-1-i] {
+			t.Fatalf("row %d = %s, want %s (newest first)", i, id, want[len(want)-1-i])
+		}
+	}
+	base := "/internal/v1/accounts/" + h.acct + "/transactions?"
+	for _, q := range []string{"limit=0", "limit=101", "cursor=not-a-cursor"} {
+		if w := h.do("GET", base+q, opsToken, "", ""); w.Code != http.StatusBadRequest {
+			t.Fatalf("?%s: %d, want 400", q, w.Code)
+		}
+	}
+	for _, id := range []string{"00000000-0000-7000-8000-000000000000", "nope"} {
+		if w := h.do("GET", "/internal/v1/accounts/"+id+"/transactions", opsToken, "", ""); w.Code != http.StatusNotFound || field(t, w, "error", "code") != "account_not_found" {
+			t.Fatalf("account %s: %d %s, want 404 account_not_found", id, w.Code, w.Body)
+		}
+	}
+}
+
 // Freeze and unfreeze reasons are free text an operator typed: the events
 // keep the actor and the rule, never the reason.
 func TestOpsAccountEventsOmitFreezeReason(t *testing.T) {
@@ -376,7 +447,7 @@ func TestOpsRoutesRequireRead(t *testing.T) {
 	h := newOpsHarness(t)
 	id := h.credit("c-1", 100, "")
 	for _, p := range []string{"/internal/v1/accounts", "/internal/v1/transactions", "/internal/v1/transactions/" + id + "/detail",
-		"/internal/v1/accounts/" + h.acct + "/events", "/internal/v1/stats"} {
+		"/internal/v1/accounts/" + h.acct + "/events", "/internal/v1/accounts/" + h.acct + "/transactions", "/internal/v1/stats"} {
 		if w := h.do("GET", p, freezeOnlyToken, "", ""); w.Code != http.StatusForbidden {
 			t.Fatalf("%s with a freeze-only client: %d, want 403", p, w.Code)
 		}

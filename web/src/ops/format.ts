@@ -24,3 +24,7 @@ export const between = (from: string, to: string) => duration(new Date(to).getTi
 
 // percent rounds down, so a single failure never shows as 100%.
 export const percent = (r: number) => `${(Math.floor(r * 1000 + 1e-9) / 10).toFixed(1)}%`;
+
+// when is a timestamp's local date and time: 12 Nov, 07:11:18.
+export const when = (iso: string) =>
+  new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });

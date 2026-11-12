@@ -523,6 +523,7 @@ type ConsoleConfig struct {
 	PaymentsToken   string // CONSOLE_PAYMENTS_TOKEN: demo credits and debits; never logged
 	ReadToken       string // CONSOLE_READ_TOKEN: ledger-api's read operation, for the ops screens; never logged
 	LokiURL         string // CONSOLE_LOKI_URL: the activity signals; "" leaves them out
+	GrafanaURL      string // CONSOLE_GRAFANA_URL: Grafana as the browser reaches it, for Explore links; "" leaves them out
 	LogLevel        slog.Level
 	TrustedProxies  []string
 	ShutdownTimeout time.Duration
@@ -540,6 +541,7 @@ func LoadConsole() (ConsoleConfig, error) {
 		PaymentsToken:   os.Getenv("CONSOLE_PAYMENTS_TOKEN"),
 		ReadToken:       os.Getenv("CONSOLE_READ_TOKEN"),
 		LokiURL:         os.Getenv("CONSOLE_LOKI_URL"),
+		GrafanaURL:      strings.TrimRight(os.Getenv("CONSOLE_GRAFANA_URL"), "/"),
 		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -555,6 +557,9 @@ func LoadConsole() (ConsoleConfig, error) {
 	urls := map[string]string{"CONSOLE_AUTH_API_URL": cfg.AuthAPIURL, "CONSOLE_LEDGER_API_URL": cfg.LedgerAPIURL}
 	if cfg.LokiURL != "" {
 		urls["CONSOLE_LOKI_URL"] = cfg.LokiURL
+	}
+	if cfg.GrafanaURL != "" {
+		urls["CONSOLE_GRAFANA_URL"] = cfg.GrafanaURL
 	}
 	for key, v := range urls {
 		if u, err := url.Parse(v); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

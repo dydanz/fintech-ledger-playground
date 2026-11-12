@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,9 @@ const (
 	txRecovered = "01a1c4fb-0000-7000-8000-00000000000r"
 	txNormal    = "01a1c4fb-0000-7000-8000-00000000000n"
 	txRefused   = "01a1c4fb-0000-7000-8000-00000000000f"
+	txVoided    = "01a1c4fb-0000-7000-8000-00000000000v"
+	txVoid      = "01a1c4fb-0000-7000-8000-0000000000v2"
+	traceID     = "4bf92f3577b34da6a3ce929d0e0e4736"
 )
 
 // fakeLedger answers ledger-api's ops reads and counts them per path.
@@ -36,6 +40,8 @@ type fakeLedger struct {
 	auth  []string
 	down  bool
 	stats string
+	// lastQuery is the query of the last account-transactions read.
+	lastQuery string
 }
 
 func (f *fakeLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,8 +55,8 @@ func (f *fakeLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	tx := func(id, status, reason string, created, settled time.Time) string {
-		s := fmt.Sprintf(`{"id":%q,"type":"DEBIT","status":%q,"failure_reason":%q,"account_id":"a1","amount":500,"currency":"IDR","requested_by":"payments","trace_id":"t","created_at":%q,"updated_at":%q`,
-			id, status, reason, created.Format(time.RFC3339Nano), settled.Format(time.RFC3339Nano))
+		s := fmt.Sprintf(`{"id":%q,"type":"DEBIT","status":%q,"failure_reason":%q,"account_id":"a1","amount":500,"currency":"IDR","requested_by":"payments","trace_id":%q,"created_at":%q,"updated_at":%q`,
+			id, status, reason, traceID, created.Format(time.RFC3339Nano), settled.Format(time.RFC3339Nano))
 		if status == "SETTLED" {
 			s += fmt.Sprintf(`,"settled_at":%q`, settled.Format(time.RFC3339Nano))
 		}
@@ -74,6 +80,17 @@ func (f *fakeLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			tx(txRecovered, "SETTLED", "", c, c.Add(47*time.Second)), c.Format(time.RFC3339), c.Add(47*time.Second).Format(time.RFC3339),
 			c.Add(47*time.Second).Format(time.RFC3339), c.Add(48*time.Second).Format(time.RFC3339), c.Add(48*time.Second).Format(time.RFC3339),
 			c.Add(48*time.Second).Format(time.RFC3339))
+	case r.URL.Path == "/internal/v1/transactions/"+txVoided+"/detail":
+		_, _ = fmt.Fprintf(w, `{"transaction":%s,"events":[
+			{"type":"TransactionRequested","version":1,"payload":{"requested_by":"payments"},"occurred_at":%q},
+			{"type":"TransactionVoided","version":4,"payload":{"void_transaction_id":%q},"occurred_at":%q}],"journal":[],"outbox":[]}`,
+			tx(txVoided, "VOIDED", "", c, c), c.Format(time.RFC3339), txVoid, c.Add(time.Minute).Format(time.RFC3339))
+	case r.URL.Path == "/internal/v1/accounts/a1/transactions":
+		f.mu.Lock()
+		f.lastQuery = r.URL.RawQuery
+		f.mu.Unlock()
+		_, _ = fmt.Fprintf(w, `{"transactions":[%s,%s],"next_cursor":"more"}`,
+			tx(txRecovered, "SETTLED", "", c, c.Add(47*time.Second)), tx(txRefused, "FAILED", "insufficient_funds", c, c))
 	case r.URL.Path == "/internal/v1/accounts":
 		_, _ = w.Write([]byte(`{"accounts":[{"id":"a1","status":"ACTIVE","ledgers":[]}],"next_cursor":"x"}`))
 	case r.URL.Path == "/internal/v1/accounts/a1":
@@ -84,6 +101,12 @@ func (f *fakeLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":{"code":"transaction_not_found","message":"transaction not found"}}`))
 	}
+}
+
+func (f *fakeLedger) query() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastQuery
 }
 
 func (f *fakeLedger) hit(path string) int {
@@ -155,7 +178,9 @@ type opsEnv struct {
 	logs   *bytes.Buffer
 }
 
-func newOpsEnv(t *testing.T) *opsEnv {
+func newOpsEnv(t *testing.T) *opsEnv { t.Helper(); return newOpsEnvWith(t, nil) }
+
+func newOpsEnvWith(t *testing.T, edit func(*console.OpsConfig)) *opsEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	led := &fakeLedger{hits: map[string]int{}, stats: statsBody}
@@ -167,9 +192,14 @@ func newOpsEnv(t *testing.T) *opsEnv {
 	t.Cleanup(lokiSrv.Close)
 	now := opsNow
 	logs := &bytes.Buffer{}
+	opsCfg := console.OpsConfig{ReadToken: readTok, Loki: console.NewLoki(lokiSrv.URL, time.Second), Now: func() time.Time { return now },
+		GrafanaURL: "http://grafana.test:3000"}
+	if edit != nil {
+		edit(&opsCfg)
+	}
 	r, err := console.NewRouter(console.Deps{Logger: logger.New(logs, slog.LevelDebug, "ledger-console"), Web: builtApp(),
 		Ledger: console.Upstream{Name: "ledger-api", BaseURL: ledSrv.URL},
-		Ops:    console.OpsConfig{ReadToken: readTok, Loki: console.NewLoki(lokiSrv.URL, time.Second), Now: func() time.Time { return now }}})
+		Ops:    opsCfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,8 +352,39 @@ func TestTransactionTimeline(t *testing.T) {
 	if n := len(dig(m, "journal").([]any)); n != 2 {
 		t.Fatalf("journal lines = %d", n)
 	}
+	// The trace id links to Grafana Explore, over the transaction's time.
+	explore, _ := dig(m, "explore_url").(string)
+	u, err := url.Parse(explore)
+	if err != nil || !strings.HasPrefix(explore, "http://grafana.test:3000/explore?") {
+		t.Fatalf("explore_url = %q", explore)
+	}
+	panes := u.Query().Get("panes")
+	if !strings.Contains(panes, `|= \"`+traceID+`\"`) || !strings.Contains(panes, `"uid":"loki"`) {
+		t.Fatalf("explore panes = %s", panes)
+	}
+	if dig(m, "reversed_by") != nil {
+		t.Fatalf("reversed_by on a transaction never voided: %v", dig(m, "reversed_by"))
+	}
 	if code, _ := e.get(t, "/console/api/ops/transactions/01a1c4fb-0000-7000-8000-000000000000"); code != 404 {
 		t.Fatalf("unknown transaction: %d", code)
+	}
+}
+
+// A voided original names the void that reversed it, from its
+// TransactionVoided event, so the screen can link the two.
+func TestVoidedTransactionNamesItsVoid(t *testing.T) {
+	e := newOpsEnv(t)
+	code, m := e.get(t, "/console/api/ops/transactions/"+txVoided)
+	if code != 200 || dig(m, "reversed_by") != txVoid || dig(m, "label", "label") != "reversed" {
+		t.Fatalf("voided detail: %d reversed_by=%v label=%v", code, dig(m, "reversed_by"), dig(m, "label"))
+	}
+}
+
+// Without a Grafana URL configured there's no Explore link.
+func TestNoExploreLinkWithoutGrafana(t *testing.T) {
+	e := newOpsEnvWith(t, func(c *console.OpsConfig) { c.GrafanaURL = "" })
+	if code, m := e.get(t, "/console/api/ops/transactions/"+txRecovered); code != 200 || dig(m, "explore_url") != nil {
+		t.Fatalf("detail: %d explore_url=%v", code, dig(m, "explore_url"))
 	}
 }
 
@@ -343,5 +404,16 @@ func TestAccounts(t *testing.T) {
 	code, m := e.get(t, "/console/api/ops/accounts/a1")
 	if code != 200 || dig(m, "account", "status") != "FROZEN" || dig(m, "events", 0, "payload", "rule") != "topup_velocity" {
 		t.Fatalf("account: %d %v", code, m)
+	}
+	// Its transactions, labelled like the feed, and the cursor for more.
+	if dig(m, "transactions", 0, "label") != "recovered" || dig(m, "transactions", 1, "label") != "rejected" ||
+		dig(m, "transactions", 0, "transaction", "id") != txRecovered || dig(m, "next_cursor") != "more" || dig(m, "signals", "available") != true {
+		t.Fatalf("account transactions: %v next=%v", dig(m, "transactions"), dig(m, "next_cursor"))
+	}
+	if q := e.ledger.query(); q != "limit=20" {
+		t.Fatalf("first page query = %q, want limit=20", q)
+	}
+	if code, _ := e.get(t, "/console/api/ops/accounts/a1?cursor=more"); code != 200 || e.ledger.query() != "cursor=more&limit=20" {
+		t.Fatalf("next page: %d query %q", code, e.ledger.query())
 	}
 }

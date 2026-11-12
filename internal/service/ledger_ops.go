@@ -30,6 +30,7 @@ type OpsStore interface {
 	ListAccounts(ctx context.Context, afterID string, limit int) ([]repository.AccountRecord, error)
 	ListLedgersOfAccounts(ctx context.Context, accountIDs []string) ([]repository.LedgerRecord, error)
 	ListTransactionsByChange(ctx context.Context, q repository.OpsTransactionQuery) ([]repository.TransactionRecord, error)
+	ListTransactions(ctx context.Context, q repository.TransactionQuery) ([]repository.TransactionRecord, error)
 	ListEventRows(ctx context.Context, streamID string) ([]repository.EventRow, error)
 	ListJournalOfTransaction(ctx context.Context, transactionID string) ([]repository.OpsJournalLine, error)
 	ListOutboxPublications(ctx context.Context, eventIDs []string) ([]repository.OutboxPublication, error)
@@ -210,6 +211,45 @@ func (r *OpsReader) Transactions(ctx context.Context, q OpsTransactionsQuery) (O
 		rows = rows[:limit]
 		last := rows[len(rows)-1]
 		page.NextCursor = encodeChangeCursor(repository.ChangeCursor{UpdatedAt: last.UpdatedAt, ID: last.ID})
+	}
+	for _, t := range rows {
+		page.Transactions = append(page.Transactions, toOpsTransactionView(t))
+	}
+	return page, nil
+}
+
+// AccountTransactions lists one account's transactions, newest first (on
+// transactions_account_created_idx), with the same cursor as the user route.
+func (r *OpsReader) AccountTransactions(ctx context.Context, accountID string, limit int, cursor string) (OpsTransactionPage, error) {
+	if !uuidPattern.MatchString(accountID) {
+		return OpsTransactionPage{}, ErrAccountNotFound
+	}
+	limit, err := pageLimit(limit)
+	if err != nil {
+		return OpsTransactionPage{}, err
+	}
+	var after *repository.TransactionCursor
+	if cursor != "" {
+		c, err := decodeCursor(cursor)
+		if err != nil {
+			return OpsTransactionPage{}, &ValidationError{Msg: "cursor is invalid"}
+		}
+		after = &c
+	}
+	if _, err := r.store.GetAccount(ctx, accountID); errors.Is(err, repository.ErrNotFound) {
+		return OpsTransactionPage{}, ErrAccountNotFound
+	} else if err != nil {
+		return OpsTransactionPage{}, err
+	}
+	rows, err := r.store.ListTransactions(ctx, repository.TransactionQuery{AccountID: accountID, Limit: limit + 1, After: after})
+	if err != nil {
+		return OpsTransactionPage{}, err
+	}
+	page := OpsTransactionPage{Transactions: []OpsTransactionView{}}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		page.NextCursor = encodeCursor(repository.TransactionCursor{CreatedAt: last.CreatedAt, ID: last.ID})
 	}
 	for _, t := range rows {
 		page.Transactions = append(page.Transactions, toOpsTransactionView(t))
