@@ -139,7 +139,7 @@ The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026
 
 A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance per currency, and last activity. An account's page shows its balances, its status history (frozen and unfrozen, by whom, under which rule) and its transactions.
 
-*Decided in C3.3:* the list shows when the account was opened instead of its last activity, which ledger-api's account list doesn't carry (a per-row query would be needed). The status history is the account's event stream, newest first; the freeze reason an operator typed is never in it. Transactions page 20 at a time, labelled like the Monitor's feed.
+*Decided in C3.3:* the list shows when the account was opened instead of its last activity, which ledger-api's account list doesn't carry (a per-row query would be needed). The status history is the account's event stream, newest first; the freeze reason an operator typed is never in it. Transactions page 20 at a time, labelled like the Monitor's feed. Without the log signals, the Transactions list and the account page say that recovered transactions show as Normal (the recovery is known only from the logs); the outcome from the ledger is still correct.
 
 ### 5.4 Auth and My account (`/login`, `/register`, `/profile`, `/me`)
 

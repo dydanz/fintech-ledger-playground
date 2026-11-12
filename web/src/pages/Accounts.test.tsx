@@ -83,10 +83,24 @@ describe('Account', () => {
     expect(screen.queryByRole('button', { name: 'Load older' })).not.toBeInTheDocument();
   });
 
+  it('without the log signals, says recoveries cannot be told apart', async () => {
+    mockFetch({ [`GET /ops/accounts/${A1}`]: { status: 200, body: detail({ signals: { available: false } }) } });
+    renderApp(`/accounts/${A1}`);
+    expect(await screen.findByRole('note')).toHaveTextContent('recovered transactions show as Normal');
+  });
+
   it('says so when the account does not exist', async () => {
     mockFetch({ [`GET /ops/accounts/${A1}`]: { status: 404, body: { error: { code: 'account_not_found', message: 'account not found' } } } });
     renderApp(`/accounts/${A1}`);
     expect(await screen.findByRole('alert')).toHaveTextContent('No account with this id.');
+  });
+});
+
+describe('Transactions list without the log signals', () => {
+  it('says recoveries cannot be told apart', async () => {
+    mockFetch({ 'GET /ops/transactions?limit=50': { status: 200, body: { transactions: [item('t-1', 'normal', 'Settled in 3 ms')], signals: { available: false } } } });
+    renderApp('/transactions');
+    expect(await screen.findByRole('note')).toHaveTextContent('recovered transactions show as Normal');
   });
 });
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { ErrorLine } from '../auth/Notice';
+import { SignalsNote } from '../ops/SignalsNote';
 import { TxTable } from '../ops/TxTable';
 import type { TxPage } from '../ops/types';
 
@@ -49,6 +50,7 @@ export function Transactions() {
         {select('Type', type, setType, types)}
       </div>
       <ErrorLine error={q.error} />
+      {q.data?.pages.some((p) => !p.signals.available) && <SignalsNote />}
       {q.isSuccess && (
         <div className="card">
           <TxTable label="Transactions" items={items} />

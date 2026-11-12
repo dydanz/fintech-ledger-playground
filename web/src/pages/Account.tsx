@@ -2,6 +2,7 @@ import { useParams } from 'react-router';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { ErrorLine } from '../auth/Notice';
+import { SignalsNote } from '../ops/SignalsNote';
 import { TxTable } from '../ops/TxTable';
 import { num, shortId, when } from '../ops/format';
 import type { AccountDetail, AccountEvent } from '../ops/types';
@@ -65,6 +66,7 @@ export function Account() {
         <StatusChip status={a.status} /> <span className="mono">{a.id}</span>
       </p>
       <ErrorLine error={q.error} />
+      {q.data!.pages.some((p) => !p.signals.available) && <SignalsNote />}
       <div className="tiles" role="region" aria-label="Balances">
         {a.ledgers.map((l) => (
           <div className="tile" key={l.id}>
