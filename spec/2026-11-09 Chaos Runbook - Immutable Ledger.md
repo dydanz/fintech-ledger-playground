@@ -32,7 +32,7 @@ The runner also samples the outbox and in-flight transactions every second.
 
 | Fault | §13.5 expects | Result | Status |
 | :--- | :--- | :--- | :--- |
-| Stop Redis (60 s) | Writes continue; idempotency falls back to Postgres | 9,101 of 9,101 writes answered on the first try. Write time p50 191 ms, p99 235 ms during the outage (5 ms / 55 ms before) | ✅ Met (latency: §6.2) |
+| Stop Redis (60 s) | Writes continue; idempotency falls back to Postgres | 9,101 of 9,101 writes answered on the first try. Write time p50 191 ms, p99 235 ms during the outage (5 ms / 55 ms before). Since #60's breaker: p50 2 ms, p99 16–23 ms during it | ✅ Met (latency: fixed, §6.2) |
 | Stop Kafka (5 min) | Writes continue; the outbox grows and drains after recovery with no loss | 21,101 of 21,101 answered on the first try, latency unchanged. The outbox grew to 46,320 rows and drained 9 s after Kafka started. 0 of 63,503 events lost, 458 delivered twice | ✅ Met (alerting: §6.1) |
 | Kill -9 Postgres (30 s) | 503 `ledger_unavailable`; no partial state; the sweeper finishes any PENDING after recovery | 866 requests failed for up to 34 s. Their 15,303 failed attempts were all `503 ledger_unavailable`, except 1 connection cut at the kill. All 866 succeeded with their keys after recovery: no missing, extra or duplicate transactions. One write had committed only Tx1 and got a 202; the sweeper completed it (`ledger.recover stuck_pending`) | ✅ Met |
 | Kill -9 the `ledger-worker` leader | A new leader within 10 s | All 7 jobs taken over by the other replica 2.2 s after the kill; writes unaffected; outbox lag peaked at 1.3 s | ✅ Met |
@@ -90,7 +90,7 @@ The steps for a shared or production-like environment are the same as in the tab
 
 | Fault | Expected signals (Loki: `{service="…"} \| json \| event="…"`) | Not expected |
 | :--- | :--- | :--- |
-| Redis | ledger-api `dependency.call` warn, `dependency=redis`, `reason` `timeout` or `unknown`: two per write (§6.2). fraud-engine `dependency.call` warn while it retries. Writes stay 201 | Any 5xx; `ledger.idempotency` replays (there are none without retries) |
+| Redis | ledger-api `dependency.call` warn, `dependency=redis`, `reason` `timeout` or `unknown`: once when Redis goes, and one `outcome=success` line when it's back (§6.2). fraud-engine `dependency.call` warn while it retries. Writes stay 201 | Any 5xx; `ledger.idempotency` replays (there are none without retries) |
 | Kafka | `outbox.publish` warn `kafka_unavailable` every 10–15 s (the 10 s publish timeout plus backoff), error from 1 minute on. `outbox.lag` warn every 30 s with the growing `pending` and `lag_ms`. The alert `Ledger outbox lag above 5 s` goes Pending within about 30 s and fires about 2.5 min in. After recovery: `outbox.lag` back to info, lag 0. (Before the fix in §6.1, `outbox.lag` went silent and the alert fired at about 4.5 min, on NoData.) | Any write failure; outbox rows still unpublished a minute after Kafka is back |
 | Postgres | Every write is 503 `ledger_unavailable`, answered quickly (access log: p50 3 ms, p99 95 ms, max 110 ms). ledger-api `ledger.credit`/`ledger.debit` failure `pg_error`. ledger-worker `app.leader` failure `connection_lost` and `pg_error`, then `acquired` again after recovery. `outbox.publish` failure `pg_error`. After recovery: `ledger.recover stuck_pending` for any write that committed only Tx1 | Requests hanging until the client timeout; `processing_timeout`; reconciler mismatches |
 | Worker | The surviving replica logs `app.leader state=acquired` for all 7 jobs within the 5 s `AcquireEvery`. Outbox lag peaks at about 1 s | Lag beyond a few seconds; any job without a leader |
@@ -180,14 +180,28 @@ The table's backlog times are read from the 1 s samples: the first sample with a
 
 The alert also showed `Pending (NoData)` in the first minute of the after run. That came from the stack itself: it had started 51 s before the fault, and Grafana's first evaluation, 24 s after the start, had no heartbeat in Loki yet. The NoData state cleared at 10:43:00, while the lag-value path stayed Pending and then fired.
 
-### 6.2 A Redis outage adds about 190 ms to every write
+### 6.2 A Redis outage added about 190 ms to every write (fixed)
 
 **What happens:**
 - With Redis down, each write tries the idempotency cache twice (`idempotency_get` before Tx1, `idempotency_set` after). Each try waits out the 100 ms `cacheTimeout`.
 - Writes keep succeeding, but they take 191 ms at p50 and 235 ms at p99. That exceeds the NFR-2 p99 target of 150 ms for as long as Redis is down.
 - It's also two `dependency.call` warn lines per write: 6,148 in 60 s at 50/s. At 300 TPS that would be about 600 lines a second.
 
-**Not decided:** whether this is acceptable for a degraded mode. If it isn't, a short circuit breaker would skip Redis after a failure, for example for 5 s, and probe again. That would remove both the latency and the log volume. Logging once per outage, as `outbox.Notifier` does, would also need an exception to the one-event-per-occurrence rule in `.claude/rules/observability-logging.md`.
+**Fix** (`perf/idempotency-cache-breaker`, #60): a circuit breaker in front of the cache.
+- The first failed call logs `dependency.call` once (with `retry_in`) and opens the breaker. Writes then skip Redis and go straight to Postgres, which decides replays anyway.
+- Every `LedgerConfig.CacheRetry` (5 s), one call probes Redis; the others keep skipping. A failed probe isn't logged again. The probe that finds Redis back logs `dependency.call` `outcome=success` with `down_ms` and `skipped`.
+- So the outage costs one 100 ms wait per 5 s instead of two per write, and two log lines instead of two per write. The catalog records the once-per-outage exception, as it already did for `outbox.Notifier` and the console's Loki calls.
+
+**The drill again,** on an isolated stack, alternating builds (`make chaos FAULT=redis`, 50 writes/s, Redis stopped for 60 s):
+
+| Run | ledger-api | Write time p50 / p99 before → during → after | `dependency.call` lines |
+| :--- | :--- | :--- | :--- |
+| `1794465809` | breaker | 3 / 16 → 2 / 16 → 3 / 231 ms | 4: the opening failure, the recovery (`skipped` 6,122, `down_ms` 61,284), then a 12 ms blip that opened and closed it |
+| `1794466068` | `main` | 3 / 11 → 191 / 330 → 3 / 19 ms | 2 per write |
+| `1794466298` | breaker | 3 / 11 → 2 / 23 → 3 / 142 ms | 2: the opening failure, the recovery (`skipped` 6,120) |
+| `1794466597` | `main` | 3 / 88 → 193 / 357 → 6 / 1,875 ms | 2 per write |
+
+During the outage, the probe adds about 100 ms to one write every 5 s, which shows as `max` 108–119 ms. The "after" p99 varies between runs on both builds (19 to 1,875 ms). The slow writes come in bursts that start 15–60 s after Redis is back, unrelated to the recovery moment. In one burst, every in-flight request finished within 30 ms of the others, and no cache timeout was logged. That's the laptop under load (Docker Desktop), not the cache: `main` shows it too.
 
 ### 6.3 A hung leader keeps its jobs (outside §13.5)
 
