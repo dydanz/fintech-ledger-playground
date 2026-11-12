@@ -32,13 +32,21 @@ type faultStore struct {
 	calls  int
 	failAt int
 	err    error
+	// afterCommit: run the failing call for real, then return err.
+	afterCommit bool
 }
 
 func (f *faultStore) InTx(ctx context.Context, d time.Duration, fn func(repository.LedgerTx) error) error {
 	f.mu.Lock()
 	f.calls++
-	fail := f.calls == f.failAt
+	fail, after := f.calls == f.failAt, f.afterCommit
 	f.mu.Unlock()
+	if fail && after {
+		if err := f.LedgerStore.InTx(ctx, d, fn); err != nil {
+			return err
+		}
+		return f.err
+	}
 	if fail {
 		return f.err
 	}
@@ -464,6 +472,38 @@ func TestTx2FailureReturns202ThenCompletesThroughProcess(t *testing.T) {
 	again, err := e.svc.Process(e.ctx, service.ProcessInput{TransactionID: pending.ID, ClientID: "payments", KeyHash: idempotency.HashKey("slow")})
 	if err != nil || again.Status != http.StatusCreated || strings.Contains(e.logs.String(), `"event":"ledger.credit"`) {
 		t.Fatalf("second process: %d %v, logs %s", again.Status, err, e.logs)
+	}
+}
+
+// commitThenFail runs the n-th InTx call from now for real, then reports
+// the outcome as unknown: the commit landed, but the answer was lost.
+func (f *faultStore) commitThenFail(n int) {
+	f.mu.Lock()
+	f.failAt, f.err, f.afterCommit = f.calls+n, fmt.Errorf("%w: commit: unexpected EOF", repository.ErrCommitUnknown), true
+	f.mu.Unlock()
+}
+
+// A Tx1 whose COMMIT outcome is unknown isn't logged as "did not commit":
+// it carries the transaction id, and a retry with the same key finds it (#58).
+func TestTx1CommitOfUnknownOutcome(t *testing.T) {
+	e := newSvcEnv(t, 2*time.Second)
+	accountID := e.openAccount("unknown@example.com")
+	e.resetLogs()
+
+	e.store.commitThenFail(1)
+	if _, err := e.money(e.svc.Credit, "lost", accountID, 70, "IDR"); !errors.Is(err, repository.ErrCommitUnknown) {
+		t.Fatalf("err = %v, want ErrCommitUnknown", err)
+	}
+	var txID string
+	if err := e.pool.QueryRow(e.ctx, `SELECT id FROM ledger.transactions WHERE account_id = $1`, accountID).Scan(&txID); err != nil {
+		t.Fatal(err)
+	}
+	wantEvent(t, e.logs, "ledger.credit", map[string]any{"outcome": "failure", "reason": "commit_unknown", "level": "error", "transaction_id": txID})
+
+	// The client retries: the key maps to the committed, still PENDING transaction.
+	retry, err := e.money(e.svc.Credit, "lost", accountID, 70, "IDR")
+	if err == nil || !errors.Is(err, service.ErrRequestInProgress) {
+		t.Fatalf("retry: %+v %v, want request in progress", retry, err)
 	}
 }
 

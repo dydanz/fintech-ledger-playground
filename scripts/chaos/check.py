@@ -131,8 +131,12 @@ report("every outbox event on Kafka", not lost,
 if fault in ("redis", "kafka", "worker"):
     report(f"{fault}: writes continue", not failed_attempts, f"{len(failed_attempts)} failed attempts")
 if fault == "postgres":
-    other = [e for e in failed_attempts if (e["status"], e["code"]) not in ((503, "ledger_unavailable"), (0, ""))]
-    report("postgres: failures are 503 ledger_unavailable", bool(failed_attempts) and not other,
+    # A write caught between Tx1 and Tx2 (or whose COMMIT went unanswered)
+    # is answered 409 request_in_progress on retry until the sweeper
+    # completes it: ledger-chaos.js retries those with the same key.
+    expected = ((503, "ledger_unavailable"), (0, ""), (409, "request_in_progress"))
+    other = [e for e in failed_attempts if (e["status"], e["code"]) not in expected]
+    report("postgres: failures are 503 ledger_unavailable (or 409 request_in_progress on retry)", bool(failed_attempts) and not other,
            f"{len(failed_attempts)} failed attempts, {len(other)} of another kind"
            + (" (none at all: did the fault happen?)" if not failed_attempts else ""))
 if fault == "worker":
