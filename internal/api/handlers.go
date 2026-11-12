@@ -26,12 +26,13 @@ type userResponse struct {
 	Email     string    `json:"email"`
 	FullName  string    `json:"full_name"`
 	Bio       string    `json:"bio"`
+	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func toUserResponse(u repository.User) userResponse {
-	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Bio: u.Bio, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
+	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Bio: u.Bio, Role: u.Role, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
 }
 
 // POST /api/v1/auth/register

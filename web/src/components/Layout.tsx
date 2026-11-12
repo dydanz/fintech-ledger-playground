@@ -2,18 +2,21 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { session, useToken } from '../auth/session';
+import { useProfile } from '../auth/useProfile';
 
+// The ops screens are linked only for ops users (D§7.5).
 const links = [
-  { to: '/', label: 'Monitor', end: true },
-  { to: '/transactions', label: 'Transactions' },
-  { to: '/accounts', label: 'Accounts' },
-  { to: '/me', label: 'My account' },
+  { to: '/', label: 'Monitor', end: true, ops: true },
+  { to: '/transactions', label: 'Transactions', ops: true },
+  { to: '/accounts', label: 'Accounts', ops: true },
+  { to: '/me', label: 'My account', ops: false },
 ];
 
 export function Layout() {
   const token = useToken();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isOps = useProfile().data?.role === 'ops';
 
   // Logging out always ends the session here, even if auth-api can't be
   // reached; the server-side session then expires on its own.
@@ -33,13 +36,13 @@ export function Layout() {
       <header className="topbar">
         <b className="brand">fintech-ledger-playground</b>
         <nav aria-label="Main">
-          {links.map((l) => (
+          {links.filter((l) => !l.ops || isOps).map((l) => (
             <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => (isActive ? 'on' : undefined)}>
               {l.label}
             </NavLink>
           ))}
         </nav>
-        <span className="viewer">ops viewer · read only</span>
+        {isOps && <span className="viewer">ops · read only</span>}
         <span className="account" aria-label="Account">
           {token ? (
             <>

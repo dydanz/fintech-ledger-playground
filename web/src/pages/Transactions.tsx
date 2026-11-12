@@ -22,7 +22,7 @@ export function Transactions() {
       if (status) p.set('status', status);
       if (type) p.set('type', type);
       if (pageParam) p.set('cursor', pageParam);
-      return api<TxPage>(`/ops/transactions?${p}`);
+      return api<TxPage>(`/ops/transactions?${p}`, { auth: true });
     },
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,

@@ -524,6 +524,9 @@ type ConsoleConfig struct {
 	ReadToken       string // CONSOLE_READ_TOKEN: ledger-api's read operation, for the ops screens; never logged
 	LokiURL         string // CONSOLE_LOKI_URL: the activity signals; "" leaves them out
 	GrafanaURL      string // CONSOLE_GRAFANA_URL: Grafana as the browser reaches it, for Explore links; "" leaves them out
+	// AllowedHosts (CONSOLE_ALLOWED_HOSTS) are the Host headers the console
+	// answers: its own address by default, nil for any ("*").
+	AllowedHosts    []string
 	LogLevel        slog.Level
 	TrustedProxies  []string
 	ShutdownTimeout time.Duration
@@ -542,6 +545,7 @@ func LoadConsole() (ConsoleConfig, error) {
 		ReadToken:       os.Getenv("CONSOLE_READ_TOKEN"),
 		LokiURL:         os.Getenv("CONSOLE_LOKI_URL"),
 		GrafanaURL:      strings.TrimRight(os.Getenv("CONSOLE_GRAFANA_URL"), "/"),
+		AllowedHosts:    splitList(getEnv("CONSOLE_ALLOWED_HOSTS", "localhost:8090,127.0.0.1:8090")),
 		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
 		ShutdownTimeout: 15 * time.Second,
 	}
@@ -553,6 +557,9 @@ func LoadConsole() (ConsoleConfig, error) {
 		if cfg.ShutdownTimeout, err = time.ParseDuration(v); err != nil {
 			errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT: %w", err))
 		}
+	}
+	if len(cfg.AllowedHosts) == 1 && cfg.AllowedHosts[0] == "*" {
+		cfg.AllowedHosts = nil
 	}
 	urls := map[string]string{"CONSOLE_AUTH_API_URL": cfg.AuthAPIURL, "CONSOLE_LEDGER_API_URL": cfg.LedgerAPIURL}
 	if cfg.LokiURL != "" {

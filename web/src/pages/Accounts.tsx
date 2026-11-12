@@ -17,7 +17,7 @@ export const balances = (a: Account) => a.ledgers.map((l) => money(l.balance, l.
 export function Accounts() {
   const q = useInfiniteQuery({
     queryKey: ['ops', 'accounts'],
-    queryFn: ({ pageParam }) => api<AccountPage>(`/ops/accounts?limit=50${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    queryFn: ({ pageParam }) => api<AccountPage>(`/ops/accounts?limit=50${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`, { auth: true }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
   });

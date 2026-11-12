@@ -202,6 +202,38 @@
           "legendFormat": "{{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Role changes by outcome and reason (user.role_change)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"auth-api\"} | json | event=\"user.role_change\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }

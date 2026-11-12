@@ -46,6 +46,7 @@ service ─► ledger-api ─► Postgres: events + journal + outbox, in one tra
 | `make psql` · `make kafka-topics` | Postgres shell · describe the Kafka topic |
 | `make vet test` | Unit tests |
 | `make test-web` | Web console typecheck and tests (in a Node container) |
+| `make grant-role EMAIL=you@example.com` | Give a registered user the ops role, needed for the console's Monitor, Transactions and Accounts (`ROLE=user` takes it back) |
 | `make test-integration` | Integration tests (start `postgres kafka kafka-init archive-store` first) |
 | `make smoke-fraud` · `make check-alerts` | Fraud end to end · Grafana alert rules |
 | `make load PROFILE=quick` | Load test, about 2 min (after `make load-up`) |

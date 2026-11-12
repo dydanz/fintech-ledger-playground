@@ -27,7 +27,7 @@ The console also gives end users the basic account pages: register, log in and o
 **Non-goals (MVP):**
 - Writing to the ledger from the ops screens. They only read; the demo actions are on My account.
 - Real-time push. Polling every 3 s is enough.
-- Auth for the ops screens, beyond binding to 127.0.0.1.
+- ~~Auth for the ops screens, beyond binding to 127.0.0.1.~~ *Changed after C3:* the ops screens need a user with the ops role (§7.5).
 - Mobile layout, theming, i18n, and accessibility beyond semantic HTML.
 - Replacing Grafana for engineers. The console links to it.
 
@@ -262,13 +262,28 @@ Each action sends a fresh `Idempotency-Key` per click. Demo actions are on when 
 | :--- | :--- |
 | Auth | `/auth/*`, `/profile`, `/password`: pass-throughs to auth-api |
 | My account | `/me/*`: the user routes plus the demo actions |
-| Ops | `/ops/monitor?window=`: tiles, incidents, feed, bars and self-healing, in one response |
+| Ops | `/ops/monitor`: tiles, incidents, feed, bars and self-healing, in one response (no `window`; §5.1) |
 | Ops | `/ops/transactions?…` and `/ops/transactions/:id`: the detail, with the timeline already merged |
 | Ops | `/ops/accounts…` |
 
-`/ops/*` responses are cached for 2 s, so many open tabs don't multiply the load on ledger-api and Loki.
+`/ops/*` responses are cached for 2 s, so many open tabs don't multiply the load on ledger-api and Loki. Every `/ops/*` request needs the ops role (§7.5), checked before the cache.
 
 **Logging:** access log; `dependency.call` for failed ledger-api and Loki calls (reasons `timeout`, `refused`, `unknown`); `app.lifecycle`. When Loki is down, the screens still render from ledger-api data, and an "activity signals unavailable" note replaces the log-backed parts.
+
+### 7.5 Access to the ops screens (added after C3)
+
+The ops screens show every customer's balances and transactions, so they need an authenticated, authorized user. Binding to 127.0.0.1 alone doesn't protect them: any local process can read them, and so can a web page through DNS rebinding.
+
+- **Role:** auth-api's `users` gains `role` (`user` by default, or `ops`; migration 007), returned on `GET /api/v1/users/profile`.
+- **Granting:** only with `auth-api grant-role --email <email> --role ops|user` (`make grant-role EMAIL=… [ROLE=…]`). No API route changes a role, so nobody can grant one to themselves. Each grant logs `user.role_change` (C1) with `user_id`, `role` and `previous_role`, never the email.
+- **Checking:** `ledger-console` reads the caller's profile from auth-api, with the caller's own token, on every `/console/api/ops/*` request and before the 2 s cache. So an ended session or a revoked role takes effect at once.
+  - no token, or an ended session: `401 unauthorized`;
+  - a user without the ops role: `403 forbidden`;
+  - auth-api unreachable: `503 upstream_unavailable` (with a `dependency.call`, operation `ops_access`).
+  - Without auth-api configured, the ops routes aren't served at all.
+- **Accountability:** a granted request is in the access log with the user's `user_id`. Each refusal is one `console.access` event (`missing_token`, `invalid_token`, `not_ops`; a failed check is `auth_error`).
+- **Host header:** the console answers only requests whose `Host` is in `CONSOLE_ALLOWED_HOSTS` (default `localhost:8090,127.0.0.1:8090`; `*` turns the check off). Others get `403 host_not_allowed` and a `console.access` event; the host they sent isn't logged. This blocks DNS rebinding. `/healthz` and `/readyz` are exempt, for the container healthcheck.
+- **SPA:** the ops screens are wrapped in `RequireAuth` and `RequireOps`. A signed-out visitor goes to log in; a user without the role sees "Ops access needed" and no ops data is fetched. The ops links show in the nav only for ops users.
 
 ## 8. Delivery (one PR each)
 
@@ -303,7 +318,7 @@ The [Development Plan](<2026-11-10 Development Plan - Web Console.md>) breaks th
 - A Go backend for the console rather than an SPA-only frontend or an nginx proxy (§4).
 - Loki as the source of recovery and incident signals, rather than new database columns (§6.1). The ledger stays unchanged.
 - Labels drop "Retried" per transaction, and the tiles drop "0 lost / 0 duplicated" (§6.3).
-- The ops screens are open to anyone who reaches 127.0.0.1:8090, with no login, for the MVP.
+- ~~The ops screens are open to anyone who reaches 127.0.0.1:8090, with no login, for the MVP.~~ *Changed after C3:* they need the ops role, and the console checks the `Host` header (§7.5).
 - A password change ends all of the user's sessions, including the current one.
 - Demo actions live on My account, on by default in compose, capped per action.
 - The browser token is kept in `sessionStorage`. An httpOnly cookie session held by the console backend is a later hardening step.

@@ -16,7 +16,7 @@ export function Transaction() {
   const { id = '' } = useParams();
   const q = useQuery({
     queryKey: ['ops', 'transaction', id],
-    queryFn: () => api<TransactionDetail>(`/ops/transactions/${encodeURIComponent(id)}`),
+    queryFn: () => api<TransactionDetail>(`/ops/transactions/${encodeURIComponent(id)}`, { auth: true }),
     refetchInterval: (query) => {
       const s = query.state.data?.transaction.status;
       return s === 'PENDING' || s === 'PROCESSING' ? 5000 : false;

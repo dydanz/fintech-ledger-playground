@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { mockFetch, renderApp } from '../test/render';
+import { mockFetch, renderApp, signInAs } from '../test/render';
 
 const ACC = '01a1c4fb-0000-7000-8000-0000000a7f5a';
 const TX = '01a1c4fb-0000-7000-8000-00000000000r';
@@ -35,6 +35,8 @@ const open = (body: unknown, status = 200) => {
   mockFetch({ [`GET /ops/transactions/${TX}`]: { status, body } });
   renderApp(`/transactions/${TX}`);
 };
+
+beforeEach(() => signInAs('ops'));
 
 describe('Transaction', () => {
   it('shows what it was and how it was handled', async () => {

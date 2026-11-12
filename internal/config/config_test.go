@@ -187,7 +187,7 @@ func TestLoadWorkerArchive(t *testing.T) {
 }
 
 func TestLoadConsole(t *testing.T) {
-	for _, k := range []string{"SERVICE_NAME", "CONSOLE_HTTP_ADDR", "CONSOLE_WEB_DIR", "CONSOLE_AUTH_API_URL", "CONSOLE_LEDGER_API_URL", "CONSOLE_DEMO_ACTIONS", "CONSOLE_ONBOARDING_TOKEN", "CONSOLE_PAYMENTS_TOKEN", "CONSOLE_READ_TOKEN", "CONSOLE_LOKI_URL", "CONSOLE_GRAFANA_URL", "LOG_LEVEL", "SHUTDOWN_TIMEOUT", "TRUSTED_PROXIES"} {
+	for _, k := range []string{"SERVICE_NAME", "CONSOLE_HTTP_ADDR", "CONSOLE_WEB_DIR", "CONSOLE_AUTH_API_URL", "CONSOLE_LEDGER_API_URL", "CONSOLE_DEMO_ACTIONS", "CONSOLE_ONBOARDING_TOKEN", "CONSOLE_PAYMENTS_TOKEN", "CONSOLE_READ_TOKEN", "CONSOLE_LOKI_URL", "CONSOLE_GRAFANA_URL", "CONSOLE_ALLOWED_HOSTS", "LOG_LEVEL", "SHUTDOWN_TIMEOUT", "TRUSTED_PROXIES"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := config.LoadConsole()
@@ -213,6 +213,20 @@ func TestLoadConsole(t *testing.T) {
 		t.Fatalf("CONSOLE_GRAFANA_URL: %q %v, want the URL without its trailing slash", cfg.GrafanaURL, err)
 	}
 	t.Setenv("CONSOLE_GRAFANA_URL", "")
+	// The console answers only on its own address by default; "*" turns the
+	// check off.
+	if strings.Join(cfg.AllowedHosts, ",") != "localhost:8090,127.0.0.1:8090" {
+		t.Fatalf("AllowedHosts default = %v", cfg.AllowedHosts)
+	}
+	t.Setenv("CONSOLE_ALLOWED_HOSTS", " localhost:18090 , console.internal ")
+	if cfg, err := config.LoadConsole(); err != nil || strings.Join(cfg.AllowedHosts, ",") != "localhost:18090,console.internal" {
+		t.Fatalf("CONSOLE_ALLOWED_HOSTS list: %v %v", cfg.AllowedHosts, err)
+	}
+	t.Setenv("CONSOLE_ALLOWED_HOSTS", "*")
+	if cfg, err := config.LoadConsole(); err != nil || cfg.AllowedHosts != nil {
+		t.Fatalf("CONSOLE_ALLOWED_HOSTS=*: %v %v, want nil (any host)", cfg.AllowedHosts, err)
+	}
+	t.Setenv("CONSOLE_ALLOWED_HOSTS", "")
 	// Demo actions need both service tokens.
 	t.Setenv("CONSOLE_DEMO_ACTIONS", "true")
 	if _, err := config.LoadConsole(); err == nil || !strings.Contains(err.Error(), "CONSOLE_PAYMENTS_TOKEN") {

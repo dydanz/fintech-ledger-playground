@@ -18,6 +18,22 @@ export function renderApp(path: string) {
 
 type Reply = { status: number; body?: unknown };
 
+// Routes every mockFetch answers unless a test overrides them; set by
+// signInAs, cleared after each test.
+let defaults: Record<string, Reply> = {};
+export function resetDefaults() {
+  defaults = {};
+}
+
+// signInAs starts a session for a user with this role: a token in
+// sessionStorage, and GET /profile answering with the role.
+export function signInAs(role: 'ops' | 'user') {
+  sessionStorage.setItem('ledger-console.token', `tok-${role}`);
+  defaults = {
+    'GET /profile': { status: 200, body: { id: `u-${role}`, email: `${role}@example.com`, full_name: '', bio: '', role } },
+  };
+}
+
 // mockFetch answers console API calls by "METHOD /path" and records them.
 export function mockFetch(routes: Record<string, Reply | (() => Reply) | Error>) {
   const calls: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
@@ -25,7 +41,7 @@ export function mockFetch(routes: Record<string, Reply | (() => Reply) | Error>)
     const method = init.method ?? 'GET';
     const path = url.replace(/^\/console\/api/, '');
     calls.push({ method, path, headers: (init.headers ?? {}) as Record<string, string>, body: init.body ? JSON.parse(String(init.body)) : undefined });
-    const r = routes[`${method} ${path}`];
+    const r = routes[`${method} ${path}`] ?? defaults[`${method} ${path}`];
     if (r instanceof Error) throw r;
     const reply = typeof r === 'function' ? r() : (r ?? { status: 404, body: { error: { code: 'not_found', message: 'route not found' } } });
     return new Response(reply.status === 204 ? null : JSON.stringify(reply.body ?? {}), {

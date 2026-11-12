@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console logs-fraud psql
+.PHONY: up down reset migrate migrate-version grant-role rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console logs-fraud psql
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -17,6 +17,9 @@ migrate: ## apply pending migrations (`up` does this too)
 # Scope to one account with ARGS="--account <id>". Exit 3: a dry run found differences.
 rebuild-projections: ## recompute projections from events + journal (TRD §7.6)
 	docker compose run --rm --no-deps ledger-worker rebuild-projections $(ARGS)
+
+grant-role: ## give a user a role: make grant-role EMAIL=you@example.com [ROLE=ops|user]. ops opens the console's ops screens
+	docker compose run --rm --no-deps api grant-role --email '$(EMAIL)' --role '$(or $(ROLE),ops)'
 
 migrate-version: ## the schema version recorded by golang-migrate
 	docker compose run --rm migrate version

@@ -1,6 +1,6 @@
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { mockFetch, renderApp } from '../test/render';
+import { mockFetch, renderApp, signInAs } from '../test/render';
 import { POLL_MS } from './Monitor';
 
 const tx = (id: string, over: Record<string, unknown> = {}) => ({
@@ -49,6 +49,8 @@ function monitor(over: Record<string, unknown> = {}) {
 }
 
 const rows = () => within(screen.getByRole('table', { name: 'Live transactions' })).getAllByRole('row').slice(1);
+
+beforeEach(() => signInAs('ops'));
 
 describe('Monitor', () => {
   it('shows the tiles from the window', async () => {
@@ -182,12 +184,13 @@ describe('Monitor', () => {
       });
       renderApp('/');
       await screen.findByText('21,100');
+      const polls = () => calls.filter((c) => c.path === '/ops/monitor').length;
       await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-      expect(calls).toHaveLength(2);
+      expect(polls()).toBe(2);
       expect(await screen.findByRole('alert')).toHaveTextContent('The ledger could not be reached.');
       expect(screen.getByText('21,100')).toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-      expect(calls).toHaveLength(3);
+      expect(polls()).toBe(3);
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

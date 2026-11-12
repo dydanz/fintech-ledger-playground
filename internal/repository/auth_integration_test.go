@@ -38,6 +38,34 @@ func TestUpdatePasswordHash(t *testing.T) {
 	}
 }
 
+// A new user is a plain user; SetRole changes the role by email (any case)
+// and returns the previous one. The database refuses any other role.
+func TestUserRole(t *testing.T) {
+	pool := pgtest.New(t)
+	ctx := context.Background()
+	users := repository.NewUserRepo(pool)
+	u, err := users.Create(ctx, "Role@Example.com", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Role != "user" {
+		t.Fatalf("new user role = %q, want user", u.Role)
+	}
+	prev, got, err := users.SetRole(ctx, "role@example.com", "ops")
+	if err != nil || prev != "user" || got.Role != "ops" || got.ID != u.ID || !got.UpdatedAt.After(u.UpdatedAt) {
+		t.Fatalf("SetRole = %q %+v %v", prev, got, err)
+	}
+	if again, err := users.GetByID(ctx, u.ID); err != nil || again.Role != "ops" {
+		t.Fatalf("GetByID after SetRole = %+v %v", again, err)
+	}
+	if _, _, err := users.SetRole(ctx, "nobody@example.com", "ops"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("unknown email: %v, want ErrNotFound", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, u.ID); err == nil {
+		t.Fatal("the database accepted role 'admin'")
+	}
+}
+
 // RevokeAllForUser stamps every open, unexpired row of one user, once, and
 // leaves expired rows and other users' rows alone. The append-only trigger
 // allows exactly this update.

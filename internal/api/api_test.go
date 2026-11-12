@@ -47,7 +47,7 @@ func (f *fakeUsers) Create(_ context.Context, email, hash string) (repository.Us
 	}
 	f.seq++
 	now := time.Now()
-	u := &repository.User{ID: fmt.Sprintf("user-%d", f.seq), Email: email, PasswordHash: hash, CreatedAt: now, UpdatedAt: now}
+	u := &repository.User{ID: fmt.Sprintf("user-%d", f.seq), Email: email, PasswordHash: hash, Role: "user", CreatedAt: now, UpdatedAt: now}
 	f.byID[u.ID] = u
 	return *u, nil
 }
@@ -269,7 +269,8 @@ func TestFullFlow(t *testing.T) {
 	}
 	var prof map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &prof)
-	if prof["full_name"] != "Alice Liddell" || prof["email"] != "alice@example.com" {
+	// The role is on the profile (the console's ops check reads it).
+	if prof["full_name"] != "Alice Liddell" || prof["email"] != "alice@example.com" || prof["role"] != "user" {
 		t.Fatalf("profile = %v", prof)
 	}
 	if _, leaked := prof["password_hash"]; leaked {

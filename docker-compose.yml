@@ -139,6 +139,9 @@ services:
       CONSOLE_LOKI_URL: http://loki:3100
       # Grafana as your browser reaches it: the trace id's Explore link.
       CONSOLE_GRAFANA_URL: ${CONSOLE_GRAFANA_URL:-http://localhost:3000}
+      # The Host headers the console answers (blocks DNS rebinding); match
+      # the published port.
+      CONSOLE_ALLOWED_HOSTS: ${CONSOLE_ALLOWED_HOSTS:-localhost:8090,127.0.0.1:8090}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8090:8090"

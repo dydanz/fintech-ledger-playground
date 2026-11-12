@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { mockFetch, renderApp } from '../test/render';
+import { mockFetch, renderApp, signInAs } from '../test/render';
 
 const A1 = '01a1c4fb-0000-7000-8000-0000000a7f5a';
 const A2 = '01a1c4fb-0000-7000-8000-0000000a19bb';
@@ -14,6 +14,8 @@ const item = (id: string, label: string, what: string, over: Record<string, unkn
     created_at: '2026-11-11T07:10:00Z', updated_at: '2026-11-11T07:10:00Z', ...over },
   label, what, attention: false,
 });
+
+beforeEach(() => signInAs('ops'));
 
 describe('Accounts list', () => {
   it('lists accounts with status and balances, and loads more', async () => {
@@ -32,7 +34,7 @@ describe('Accounts list', () => {
     expect(rows).toHaveLength(3);
     expect(within(rows[2]).getByText('Frozen')).toHaveClass('chip', 'c-rej');
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
-    expect(calls.map((c) => c.path)).toEqual(['/ops/accounts?limit=50', '/ops/accounts?limit=50&cursor=c1']);
+    expect(calls.map((c) => c.path).filter((p) => p.startsWith('/ops/'))).toEqual(['/ops/accounts?limit=50', '/ops/accounts?limit=50&cursor=c1']);
   });
 });
 
@@ -118,7 +120,7 @@ describe('Transactions list', () => {
     expect(await screen.findByText('Insufficient funds')).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText('Type'), 'DEBIT');
     expect(await screen.findByText('No transactions match.')).toBeInTheDocument();
-    expect(calls.map((c) => c.path)).toEqual([
+    expect(calls.map((c) => c.path).filter((p) => p.startsWith('/ops/'))).toEqual([
       '/ops/transactions?limit=50', '/ops/transactions?limit=50&status=FAILED', '/ops/transactions?limit=50&status=FAILED&type=DEBIT',
     ]);
   });
