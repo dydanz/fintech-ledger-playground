@@ -16,7 +16,8 @@ onboarding, payments and ops clients), and prints what happened in plain words:
 
 It ends by checking the books: the account's journal lines sum to its balance,
 and every transaction's two lines sum to zero. Every step shows up in the web
-console (http://localhost:8090), linked at the end.
+console (http://localhost:8090), linked at the end. Those screens need the ops
+role: make grant-role EMAIL=you@example.com.
 
 The user must exist (register in the console first). The account is opened if
 it has none. Tokens default to the dev tokens in .env.example and are never
@@ -340,7 +341,7 @@ def main():
     say(f"  This run: {money(start)} → {money(final)}")
     say("  The reconciler (ledger-worker) re-checks all of this on its own, every minute.")
 
-    say(f"\nSee it in the console:\n  {CONSOLE}/accounts/{aid}")
+    say(f"\nSee it in the console (signed in with the ops role: make grant-role):\n  {CONSOLE}/accounts/{aid}")
     for tid in involved[:3]:
         say(f"  {CONSOLE}/transactions/{tid}")
     say(f"  …and the rest on the account page, or live on {CONSOLE}/")
