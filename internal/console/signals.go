@@ -142,8 +142,10 @@ func finishDatabase(i Incident, b []Bucket) Incident {
 	if n > 0 {
 		stuck = fmt.Sprintf("%d %s caught mid-way and completed by the recovery job", n, plural(n, "payment was", "payments were"))
 	}
-	i.Text = fmt.Sprintf("The database was down for %s. %s requests were refused with \"try again\" (503); %s.",
-		durationWords(i.End.Sub(i.Start)), thousands(i.Count), stuck)
+	// Count is 503 answers. Clients retry with the same key, so it isn't a
+	// number of payments (the logs can't tell how many distinct ones).
+	i.Text = fmt.Sprintf("The database was down for %s. %s %s refused with \"try again\" (503), and each retry counts; %s.",
+		durationWords(i.End.Sub(i.Start)), thousands(i.Count), plural(i.Count, "attempt was", "attempts were"), stuck)
 	return i
 }
 

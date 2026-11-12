@@ -166,6 +166,26 @@ func TestIncidentDatabaseFromTheDrill(t *testing.T) {
 	if !strings.Contains(db.Text, "1,096") || !strings.Contains(db.Text, "1 ") {
 		t.Fatalf("text = %q", db.Text)
 	}
+	// The count is of 503 answers, and clients retry: it isn't a number of
+	// payments, and the drill's report.txt counts requests (#55). Say so.
+	if !strings.Contains(db.Text, "1,096 attempts were refused") || !strings.Contains(db.Text, "each retry counts") ||
+		strings.Contains(db.Text, "requests were refused") {
+		t.Fatalf("text = %q, want it to count attempts, retries included", db.Text)
+	}
+}
+
+// One refusal reads as one, not "1 requests".
+func TestIncidentDatabaseSingleRefusal(t *testing.T) {
+	d := func(hms string) time.Time { return day.Add(7*time.Hour + mustDur(hms)) }
+	var b []console.Bucket
+	for at := d("10m30s"); !at.After(d("12m00s")); at = at.Add(console.BucketWidth) {
+		b = append(b, console.Bucket{At: at, Writes2xx: 10})
+	}
+	b[3].Refused, b[3].Writes2xx = 1, 0
+	inc := console.Incidents(b, d("12m30s"))
+	if len(inc) != 1 || !strings.Contains(inc[0].Text, "1 attempt was refused") {
+		t.Fatalf("incidents = %+v", inc)
+	}
 }
 
 func TestIncidentRedis(t *testing.T) {

@@ -26,7 +26,7 @@ function monitor(over: Record<string, unknown> = {}) {
       { kind: 'redis', active: true, started_at: '2026-11-11T07:14:30Z', title: 'Redis unavailable',
         text: 'Payments keep working without the cache, a little slower.', count: 40 },
       { kind: 'database', active: false, started_at: '2026-11-11T07:11:18Z', ended_at: '2026-11-11T07:12:03Z', title: 'Database unavailable',
-        text: 'The database was down for 45 s. 1,096 requests were refused with "try again"; 1 stuck payment was completed by the recovery job.', count: 1096, recovered: 1 },
+        text: 'The database was down for 45 s. 1,096 attempts were refused with "try again" (503), and each retry counts; 1 payment was caught mid-way and completed by the recovery job.', count: 1096, recovered: 1 },
     ],
     feed: [
       { transaction: tx('n1', { settled_at: '2026-11-11T07:11:18.003Z' }), label: 'normal', what: 'Settled in 3 ms', attention: false },
@@ -62,7 +62,8 @@ describe('Monitor', () => {
     expect(within(tiles).getByText('95.2%')).toBeInTheDocument();
     expect(within(tiles).getByText('none stuck · 0 timed out')).toBeInTheDocument();
     expect(within(tiles).getByText('1,097')).toBeInTheDocument(); // 1 recovered + 1,096 refused
-    expect(within(tiles).getByText('all completed ✓')).toBeInTheDocument();
+    // Refusals are attempts (retries count), not payments: the sub-line keeps them apart.
+    expect(within(tiles).getByText('1 recovered, 1,096 refused attempts · all completed ✓')).toBeInTheDocument();
     expect(within(tiles).getByText('✓ clean')).toBeInTheDocument();
     expect(within(tiles).getByText('2 waiting')).toBeInTheDocument();
   });
@@ -77,7 +78,8 @@ describe('Monitor', () => {
     const resolved = screen.getByRole('status', { name: /Resolved: Database unavailable/ });
     expect(resolved).toHaveClass('banner', 'resolved');
     expect(resolved).toHaveTextContent('(45 s)');
-    expect(resolved).toHaveTextContent('1 stuck payment was completed by the recovery job');
+    expect(resolved).toHaveTextContent('1,096 attempts were refused');
+    expect(resolved).toHaveTextContent('1 payment was caught mid-way and completed by the recovery job');
   });
 
   it('labels each feed row with a chip, red when it needs attention, and links it', async () => {
@@ -149,7 +151,7 @@ describe('Monitor', () => {
     renderApp('/');
     const tiles = await screen.findByRole('region', { name: 'Totals' });
     expect(within(tiles).getByText('3 pending, oldest 1 min 35 s · 0 timed out')).toBeInTheDocument();
-    expect(within(tiles).getByText('3 still pending')).toBeInTheDocument();
+    expect(within(tiles).getByText('0 recovered, 0 refused attempts · 3 still pending')).toBeInTheDocument();
     expect(within(tiles).getByText('✗ 2 mismatches')).toHaveClass('bad');
     expect(within(tiles).getByText('45,332 waiting')).toHaveClass('warnc');
     expect(within(tiles).getByText('oldest 4 min 50 s')).toBeInTheDocument();

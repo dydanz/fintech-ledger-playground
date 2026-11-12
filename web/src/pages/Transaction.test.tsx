@@ -15,11 +15,11 @@ function detail(over: Record<string, unknown> = {}) {
     },
     label: { label: 'recovered', what: "Completed by the recovery job after the request couldn't finish on its own", attention: false },
     timeline: [
-      { at: '2026-11-11T07:12:05Z', kind: 'ok', title: 'Settled: money moved', detail: 'Balance after: 1,180', source: 'ledger' },
-      { at: '2026-11-11T07:11:18Z', kind: 'ok', title: 'Request received and saved', detail: 'By payments', source: 'ledger' },
-      { at: '2026-11-11T07:12:40Z', kind: 'ok', title: 'Verified by the reconciler', source: 'logs' },
-      { at: '2026-11-11T07:12:05.003Z', kind: 'recovered', title: 'Completed by the recovery job', source: 'logs' },
-      { at: '2026-11-11T07:12:06Z', kind: 'ok', title: 'Events published to Kafka', source: 'ledger' },
+      { at: '2026-11-11T07:12:05Z', kind: 'ok', title: 'Settled: money moved', detail: 'Balance after: 1,180', source: 'ledger', actor: 'recovery job, ledger-worker' },
+      { at: '2026-11-11T07:11:18Z', kind: 'ok', title: 'Request received and saved', source: 'ledger', actor: 'payments' },
+      { at: '2026-11-11T07:12:40Z', kind: 'ok', title: 'Verified by the reconciler', source: 'logs', actor: 'reconciler, ledger-worker' },
+      { at: '2026-11-11T07:12:05.003Z', kind: 'recovered', title: 'Completed by the recovery job', source: 'logs', actor: 'recovery job, ledger-worker' },
+      { at: '2026-11-11T07:12:06Z', kind: 'ok', title: 'Events published to Kafka', source: 'ledger', actor: 'outbox relay, ledger-worker' },
     ],
     journal: [
       { id: 'j1', ledger_id: 'l1', ledger_kind: 'USER', account_id: ACC, amount: 180, currency: 'IDR', balance_after: 1180 },
@@ -60,6 +60,18 @@ describe('Transaction', () => {
     expect(within(steps[0]).getByText('ledger record')).toBeInTheDocument();
     expect(within(steps[2]).getByText('logs')).toBeInTheDocument();
     expect(steps[2]).toHaveTextContent('11 Nov, 07:12:05');
+  });
+
+  it('names who ran each step (D§5.2)', async () => {
+    open(detail());
+    const steps = within(await screen.findByRole('list', { name: 'Timeline' })).getAllByRole('listitem');
+    expect(steps.map((s) => within(s).getByTestId('step-actor').textContent)).toEqual([
+      'by payments',
+      'by recovery job, ledger-worker',
+      'by recovery job, ledger-worker',
+      'by outbox relay, ledger-worker',
+      'by reconciler, ledger-worker',
+    ]);
   });
 
   it('shows the double entry with money in equal to money out', async () => {

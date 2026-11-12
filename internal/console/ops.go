@@ -541,6 +541,24 @@ type TimelineEntry struct {
 	Title  string    `json:"title"`
 	Detail string    `json:"detail,omitempty"`
 	Source string    `json:"source"` // ledger (the permanent record) or logs
+	// Actor is who ran the step (D§5.2): the requesting client, the
+	// recovery job, or the worker or engine that did it.
+	Actor string `json:"actor,omitempty"`
+}
+
+// The actors of the steps no client runs.
+const (
+	actorRecovery   = "recovery job, ledger-worker"
+	actorRelay      = "outbox relay, ledger-worker"
+	actorFraud      = "fraud-engine"
+	actorReconciler = "reconciler, ledger-worker"
+)
+
+// tx2Event reports whether a ledger event is written by Tx2 (processing and
+// the terminal state, in one transaction): by the request, or by the
+// recovery job when the request couldn't finish.
+func tx2Event(typ string) bool {
+	return typ == "TransactionProcessing" || typ == "TransactionSettled" || typ == "TransactionFailed"
 }
 
 // transaction is GET /console/api/ops/transactions/:id: ledger-api's detail
@@ -568,15 +586,33 @@ func (o *ops) transaction(c *gin.Context) {
 		}
 		tx := d.Transaction
 		var tl []TimelineEntry
-		reversedBy := ""
+		var tx2 []int // the Tx2 steps: their actor depends on the recovery job's logs
+		reversedBy, reversal := "", -1
 		for _, e := range d.Events {
-			tl = append(tl, eventEntry(e.Type, e.Payload, e.OccurredAt))
-			if e.Type == "TransactionVoided" {
+			entry := eventEntry(e.Type, e.Payload, e.OccurredAt)
+			switch {
+			case e.Type == "TransactionRequested":
+				entry.Actor = tx.RequestedBy
+			case tx2Event(e.Type):
+				tx2 = append(tx2, len(tl))
+			case e.Type == "TransactionVoided":
 				var p struct {
 					VoidID string `json:"void_transaction_id"`
 				}
 				_ = json.Unmarshal(e.Payload, &p)
-				reversedBy = p.VoidID
+				reversedBy, reversal = p.VoidID, len(tl)
+			}
+			tl = append(tl, entry)
+		}
+		// A reversal is run by whoever requested the void.
+		if reversal >= 0 && reversedBy != "" {
+			var v struct {
+				Transaction struct {
+					RequestedBy string `json:"requested_by"`
+				} `json:"transaction"`
+			}
+			if err := o.read(ctx, "/internal/v1/transactions/"+url.PathEscape(reversedBy), &v); err == nil {
+				tl[reversal].Actor = v.Transaction.RequestedBy
 			}
 		}
 		published, waiting := time.Time{}, 0
@@ -591,7 +627,8 @@ func (o *ops) transaction(c *gin.Context) {
 		case waiting > 0:
 			tl = append(tl, TimelineEntry{At: now, Kind: "info", Title: fmt.Sprintf("%d %s waiting to be published to Kafka", waiting, plural(waiting, "event", "events")), Source: "ledger"})
 		case !published.IsZero():
-			tl = append(tl, TimelineEntry{At: published, Kind: "ok", Title: "Events published to Kafka", Detail: "Other systems (the fraud engine) receive them from here", Source: "ledger"})
+			tl = append(tl, TimelineEntry{At: published, Kind: "ok", Title: "Events published to Kafka", Detail: "Other systems (the fraud engine) receive them from here", Source: "ledger",
+				Actor: actorRelay})
 		}
 
 		recovered, available := false, o.cfg.Loki != nil
@@ -626,7 +663,8 @@ func (o *ops) transaction(c *gin.Context) {
 					// ledger.recover is logged once the sweeper has finished, so
 					// this step follows the processing and settle it ran.
 					tl = append(tl, TimelineEntry{At: ln.At, Kind: "recovered", Title: "Completed by the recovery job",
-						Detail: "The request couldn't finish on its own (for example, the database went away mid-way), so the recovery job ran the steps above", Source: "logs"})
+						Detail: "The request couldn't finish on its own (for example, the database went away mid-way), so the recovery job ran the steps above", Source: "logs",
+						Actor: actorRecovery})
 				}
 				for _, ln := range fraud {
 					if ln.Fields["transaction_id"] != tx.ID {
@@ -634,15 +672,30 @@ func (o *ops) transaction(c *gin.Context) {
 					}
 					rule, _ := ln.Fields["rule"].(string)
 					tl = append(tl, TimelineEntry{At: ln.At, Kind: "info", Title: "Fraud engine asked to freeze the account",
-						Detail: "This transaction triggered rule " + rule + " (the account may already have been frozen)", Source: "logs"})
+						Detail: "This transaction triggered rule " + rule + " (the account may already have been frozen)", Source: "logs",
+						Actor: actorFraud})
 				}
 				for _, ln := range recon {
 					if ln.Fields["outcome"] == "success" {
 						tl = append(tl, TimelineEntry{At: ln.At, Kind: "ok", Title: "Verified by the reconciler",
-							Detail: "A clean check of balances, sequences and double entries ran after it settled", Source: "logs"})
+							Detail: "A clean check of balances, sequences and double entries ran after it settled", Source: "logs",
+							Actor: actorReconciler})
 						break
 					}
 				}
+			}
+		}
+		// Tx2's steps: the recovery job's if it logged completing this
+		// transaction, the client's if the logs show it didn't, unknown
+		// without the logs.
+		for _, i := range tx2 {
+			switch {
+			case recovered:
+				tl[i].Actor = actorRecovery
+			case available:
+				tl[i].Actor = tx.RequestedBy
+			default:
+				tl[i].Actor = tx.RequestedBy + ", or the recovery job: the logs can't say"
 			}
 		}
 		sort.SliceStable(tl, func(i, j int) bool { return tl[i].At.Before(tl[j].At) })
@@ -685,8 +738,7 @@ func eventEntry(typ string, payload json.RawMessage, at time.Time) TimelineEntry
 	e := TimelineEntry{At: at, Kind: "ok", Source: "ledger"}
 	switch typ {
 	case "TransactionRequested":
-		by, _ := p["requested_by"].(string)
-		e.Title, e.Detail = "Request received and saved", "By "+by+"; recorded before any money moves, so it can't be lost"
+		e.Title, e.Detail = "Request received and saved", "Recorded before any money moves, so it can't be lost"
 	case "TransactionProcessing":
 		e.Title, e.Kind = "Processing started", "info"
 	case "TransactionSettled":
