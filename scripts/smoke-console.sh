@@ -94,9 +94,11 @@ print(next((f["label"] for f in feed if f["transaction"]["id"] == sys.argv[2]), 
 [[ "$label" == normal ]] || { echo "FAIL the top-up on the Monitor feed: label $label, want normal"; exit 1; }
 echo "ok   the top-up is on the Monitor, labelled normal"
 
-# The fraud decision reaches Loki through Alloy within a few seconds.
+# The fraud decision reaches Loki through Alloy, usually within seconds. Right
+# after make up recreates fraud-engine, Alloy finds the new container on its
+# next Docker discovery (every minute) and ships its lines then: allow 90 s.
 step=
-for _ in $(seq 1 30); do
+for _ in $(seq 1 90); do
   req "$BASE/ops/transactions/$FREEZER" -H "Authorization: Bearer $TOKEN" >/dev/null
   step=$(python3 -c 'import json, sys
 for s in json.load(open(sys.argv[1]))["timeline"]:
@@ -105,6 +107,6 @@ for s in json.load(open(sys.argv[1]))["timeline"]:
   [[ -n "$step" ]] && break
   sleep 1
 done
-[[ -n "$step" ]] || { echo "FAIL no fraud step on the freezing top-up's timeline within 30 s"; cat "$BODY"; echo; exit 1; }
+[[ -n "$step" ]] || { echo "FAIL no fraud step on the freezing top-up's timeline within 90 s"; cat "$BODY"; echo; exit 1; }
 echo "ok   the freezing top-up's timeline shows the fraud decision ($step)"
 echo "all console smoke checks passed"
