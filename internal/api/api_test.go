@@ -163,7 +163,10 @@ type harness struct {
 	logs    *bytes.Buffer
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil) }
+
+// newHarnessWith lets a test adjust the router's Deps.
+func newHarnessWith(t *testing.T, adjust func(*api.Deps)) *harness {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -181,13 +184,17 @@ func newHarness(t *testing.T) *harness {
 	}
 
 	logs := &bytes.Buffer{}
-	r, err := api.NewRouter(api.Deps{
+	deps := api.Deps{
 		Logger:   logger.New(logs, slog.LevelDebug, "auth-api"),
 		Auth:     authSvc,
 		Users:    service.NewUserService(users),
 		Sessions: sessions,
 		Ready:    func(context.Context) error { return nil },
-	})
+	}
+	if adjust != nil {
+		adjust(&deps)
+	}
+	r, err := api.NewRouter(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

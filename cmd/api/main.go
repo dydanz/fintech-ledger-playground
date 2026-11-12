@@ -115,6 +115,7 @@ func run(cfg config.Config, log *slog.Logger) error {
 		Users:          service.NewUserService(users),
 		Sessions:       sessions,
 		TrustedProxies: cfg.TrustedProxies,
+		ConsoleToken:   cfg.ConsoleToken,
 		Ready: func(ctx context.Context) error {
 			return errors.Join(db.Ping(ctx), rdb.Ping(ctx).Err())
 		},

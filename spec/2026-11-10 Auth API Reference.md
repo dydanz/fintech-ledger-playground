@@ -56,6 +56,7 @@ Logins that wrote their session without being indexed (before this was added) ar
 - Logins for unknown emails still run a bcrypt compare and return the same error as a wrong password, so accounts can't be enumerated.
 - Request bodies are capped at 1 MiB.
 - `X-Forwarded-For` is ignored unless `TRUSTED_PROXIES` is set.
+- `X-Console-Client-IP` is ledger-console's report of the browser's address. It's trusted only with an `X-Console-Token` that matches `CONSOLE_PROXY_TOKEN` (constant-time compare). That address then goes into `auth_token_history` and the access log's `client_ip`. Without a match the headers are ignored and logged as `auth.proxy` `denied`.
 - The runtime image is distroless and runs as non-root with a read-only root filesystem.
 
 ## Configuration
@@ -68,5 +69,6 @@ Logins that wrote their session without being indexed (before this was added) ar
 | `BCRYPT_COST` | `12` | |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `TRUSTED_PROXIES` | – | comma-separated CIDRs/IPs |
+| `CONSOLE_PROXY_TOKEN` | – (compose: `dev-console-proxy-token`) | shared with ledger-console; empty ignores `X-Console-Client-IP` |
 | `SERVICE_NAME` | `auth-api` | value of the `service` log field |
 | `SHUTDOWN_TIMEOUT` | `15s` | graceful drain on SIGTERM |

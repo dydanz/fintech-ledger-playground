@@ -23,6 +23,9 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
       BCRYPT_COST: ${BCRYPT_COST:-12}
+      # Shared with ledger-console: it vouches for the browser's address on
+      # logins, so auth_token_history records that, not the console's.
+      CONSOLE_PROXY_TOKEN: ${CONSOLE_PROXY_TOKEN:-dev-console-proxy-token}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "8080:8080"
@@ -136,6 +139,8 @@ services:
       # The ops screens: ledger-api reads (the read-only console client) and
       # the activity signals from Loki.
       CONSOLE_READ_TOKEN: ${CONSOLE_READ_TOKEN:-dev-console-token}
+      # Must match auth-api's: sent with the browser's address.
+      CONSOLE_PROXY_TOKEN: ${CONSOLE_PROXY_TOKEN:-dev-console-proxy-token}
       CONSOLE_LOKI_URL: http://loki:3100
       # Grafana as your browser reaches it: the trace id's Explore link.
       CONSOLE_GRAFANA_URL: ${CONSOLE_GRAFANA_URL:-http://localhost:3000}

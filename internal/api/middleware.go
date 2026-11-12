@@ -104,7 +104,7 @@ func AccessLog() gin.HandlerFunc {
 			slog.String("route", c.FullPath()),
 			slog.Int("status", status),
 			slog.Float64("latency_ms", float64(time.Since(start).Microseconds())/1000),
-			slog.String("client_ip", c.ClientIP()),
+			slog.String("client_ip", ClientIP(c)),
 			slog.Int("response_bytes", max(c.Writer.Size(), 0)),
 			slog.String("user_agent", c.Request.UserAgent()),
 		}

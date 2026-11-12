@@ -67,7 +67,7 @@ func (h *Handlers) Login(c *gin.Context) {
 	res, err := h.auth.Login(c.Request.Context(), service.LoginInput{
 		Email:     req.Email,
 		Password:  req.Password,
-		ClientIP:  c.ClientIP(),
+		ClientIP:  ClientIP(c),
 		UserAgent: c.Request.UserAgent(),
 	})
 	if err != nil {

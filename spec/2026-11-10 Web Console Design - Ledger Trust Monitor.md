@@ -145,7 +145,11 @@ A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance pe
 
 - **Register, login, logout:** these call auth-api. The token is held in memory and in `sessionStorage`, so it's cleared when the tab closes. It's sent only to the console's own `/console/api/auth/*` and `/console/api/me/*`.
   - *Added in C2.2:* when a session ends (a 401, a password change, a logout), the message for the login page is kept as a one-time notice in `sessionStorage`. Clearing the token re-renders at once, and a page's `RequireAuth` can redirect before the caller's own navigation lands, which would otherwise drop the message.
-  - *Known limit (C2.2):* auth-api records the login IP in `auth_token_history`. For a login through the console, that's the console container's address, because auth-api trusts no `X-Forwarded-For` (`TRUSTED_PROXIES` is empty) and the console doesn't send one. Fixing it needs a trusted, fixed address for the console.
+  - *Changed (#61):* auth-api records the login IP in `auth_token_history`. Through the console, that used to be the console container's address. Now the console sends the browser's address as `X-Console-Client-IP`, vouched for with `X-Console-Token` (`CONSOLE_PROXY_TOKEN`, shared by both services). auth-api trusts the address only when the token matches. Two things make the address hard to forge:
+    - the console forwards only allow-listed headers, so a browser can't send either header itself;
+    - trusting the compose network by address wouldn't do: anything reaching auth-api from the host arrives from the Docker gateway.
+
+    Under Docker Desktop, the address the console sees for a local browser is the Docker VM's gateway, not `127.0.0.1`.
 - **Profile:** edit `full_name` and `bio`, and change the password (§7.1). After a password change, every session ends and the user logs in again.
 - **My account:**
   - **Before an account exists:** an "Open my account" button.
