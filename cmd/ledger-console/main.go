@@ -49,11 +49,16 @@ func run(cfg config.ConsoleConfig, log *slog.Logger) error {
 		return fmt.Errorf("CONSOLE_WEB_DIR %s has no built app: %w", cfg.WebDir, err)
 	}
 
+	var loki *console.Loki
+	if cfg.LokiURL != "" {
+		loki = console.NewLoki(cfg.LokiURL, 5*time.Second)
+	}
 	gin.SetMode(gin.ReleaseMode)
 	router, err := console.NewRouter(console.Deps{Logger: log, Web: web, TrustedProxies: cfg.TrustedProxies,
 		Auth:   console.Upstream{Name: "auth-api", BaseURL: cfg.AuthAPIURL},
 		Ledger: console.Upstream{Name: "ledger-api", BaseURL: cfg.LedgerAPIURL},
-		Demo:   console.DemoConfig{Enabled: cfg.DemoActions, OnboardingToken: cfg.OnboardingToken, PaymentsToken: cfg.PaymentsToken}})
+		Demo:   console.DemoConfig{Enabled: cfg.DemoActions, OnboardingToken: cfg.OnboardingToken, PaymentsToken: cfg.PaymentsToken},
+		Ops:    console.OpsConfig{ReadToken: cfg.ReadToken, Loki: loki}})
 	if err != nil {
 		return err
 	}

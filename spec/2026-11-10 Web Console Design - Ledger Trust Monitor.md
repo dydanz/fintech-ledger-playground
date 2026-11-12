@@ -175,6 +175,11 @@ A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance pe
 
 ### 6.4 Incidents and self-healing events (from Loki)
 
+*Decided in C3.1:*
+- **Windows:** the Monitor's tiles cover the last **10 minutes**, and incidents and self-healing look back **30 minutes**. Longer windows wait for a cheaper source than ledger-api's stats query (plan §5).
+- **How incidents are found:** from Loki metric queries counted into 15-second buckets, which stay cheap even when a Redis outage logs 100 warnings a second. The recovery job's completions, leader changes and reconciler summaries come from their (low-volume) log lines.
+- **Worker leader changes are self-healing lines, not incident banners.** A killed replica leaves no log line of its own, so there's no start time to show; the replica taking over logs `app.leader acquired`.
+
 | Incident | Starts when | Ends when | Banner while active → when resolved |
 | :--- | :--- | :--- | :--- |
 | Kafka unavailable | first `outbox.publish` `kafka_unavailable` | `outbox.lag` back under 5 s | "Payments keep working; events are queued and will be delivered" → "N queued events delivered after Kafka recovered (T s)" |
