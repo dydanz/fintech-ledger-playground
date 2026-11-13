@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version grant-role rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console logs-fraud psql
+.PHONY: up down reset migrate migrate-version grant-role rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console demo-story logs-fraud psql
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -88,6 +88,9 @@ smoke-ledger: ## needs api and ledger-api running (make up)
 
 smoke-console: ## the web console's API end to end, incl. the fraud freeze (needs make up)
 	./scripts/smoke-console.sh
+
+demo-story: ## one user's money, step by step: top-up, purchases, a refund and a chargeback, then the books check. make demo-story EMAIL=you@example.com (registered first; writes real transactions)
+	python3 scripts/demo/account_story.py --email '$(EMAIL)'
 
 smoke-fraud: ## 4 top-ups freeze an account within 2 s (needs make up)
 	./scripts/smoke-fraud.sh
