@@ -24,6 +24,10 @@ var (
 	// ErrTimeout means a lock wait or statement exceeded the transaction's
 	// timeout. The transaction was rolled back and may be retried.
 	ErrTimeout = errors.New("ledger transaction timed out")
+	// ErrCommitUnknown means COMMIT got no answer from Postgres (the
+	// connection was lost, or the server ended the session): the
+	// transaction may or may not have committed.
+	ErrCommitUnknown = errors.New("ledger transaction commit outcome unknown")
 )
 
 const (
@@ -213,7 +217,9 @@ func NewLedgerRepo(db *pgxpool.Pool, topic string, notifier *outbox.Notifier) *L
 // InTx runs fn in one READ COMMITTED transaction and commits if fn returns
 // nil. timeout bounds every lock wait and statement (lock_timeout and
 // statement_timeout); exceeding it returns ErrTimeout. Errors raised at
-// COMMIT, such as the journal balance check, are returned wrapped.
+// COMMIT, such as the journal balance check, are returned wrapped. A COMMIT
+// that Postgres didn't answer with an ERROR (the connection dropped, or a
+// FATAL ended the session) returns ErrCommitUnknown: it may have committed.
 func (r *LedgerRepo) InTx(ctx context.Context, timeout time.Duration, fn func(LedgerTx) error) error {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -230,6 +236,10 @@ func (r *LedgerRepo) InTx(ctx context.Context, timeout time.Duration, fn func(Le
 		return mapTxErr(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Severity != "ERROR" {
+			return fmt.Errorf("%w: commit: %w", ErrCommitUnknown, err)
+		}
 		return mapTxErr(fmt.Errorf("commit: %w", err))
 	}
 	if wrote {

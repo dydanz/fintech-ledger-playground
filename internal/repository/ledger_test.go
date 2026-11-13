@@ -325,8 +325,37 @@ func TestUnbalancedJournalFailsAtCommit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unbalanced") {
 		t.Fatalf("err = %v, want unbalanced at commit", err)
 	}
+	// Postgres refused the COMMIT: the outcome is known (rolled back).
+	if errors.Is(err, repository.ErrCommitUnknown) {
+		t.Fatalf("a rejected commit was reported as unknown: %v", err)
+	}
 	if _, err := e.repo.GetTransaction(e.ctx, rec.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("transaction survived the failed commit: %v", err)
+	}
+}
+
+// A connection lost before COMMIT is answered leaves the outcome unknown:
+// the caller can't tell whether the transaction committed (#58).
+func TestLostConnectionAtCommitIsUnknown(t *testing.T) {
+	e := newEnv(t)
+	accountID, _ := e.account("lost@example.com")
+	topup := e.systemLedger(ledger.CounterpartyTopupClearing)
+	rec := pendingTx(accountID, topup, ledger.Credit, 10)
+	err := e.inTx(func(tx repository.LedgerTx) error {
+		if err := tx.InsertTransaction(e.ctx, rec); err != nil {
+			return err
+		}
+		// This test has its own database: the one idle-in-transaction
+		// session in it is this transaction's.
+		var n int
+		if err := e.pool.QueryRow(e.ctx, `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+			WHERE datname = current_database() AND state = 'idle in transaction'`).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("terminate: %d %v", n, err)
+		}
+		return nil
+	})
+	if !errors.Is(err, repository.ErrCommitUnknown) {
+		t.Fatalf("err = %v, want ErrCommitUnknown", err)
 	}
 }
 

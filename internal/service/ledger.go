@@ -593,6 +593,12 @@ func (s *LedgerService) record(ctx context.Context, p pendingTx) (Response, erro
 			s.remember(ctx, *stored) // backfill the cache from Postgres
 		}
 		return resp, err
+	case errors.Is(err, repository.ErrCommitUnknown):
+		// Tx1 may have committed. If it did, the transaction is PENDING: the
+		// sweeper completes it, and a retry with the same key finds it.
+		logger.FromContext(ctx).ErrorContext(ctx, verb(p.typ)+" commit outcome unknown", p.attrs("outcome", "failure",
+			"reason", "commit_unknown", "error", err, "transaction_id", txID)...)
+		return Response{}, err
 	case err != nil:
 		return p.fail(ctx, err)
 	}
