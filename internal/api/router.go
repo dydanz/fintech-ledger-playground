@@ -18,6 +18,10 @@ type Deps struct {
 	Sessions       SessionLookup
 	Ready          func(ctx context.Context) error // dependency check for /readyz
 	TrustedProxies []string                        // nil: ignore X-Forwarded-For
+	// ConsoleToken (CONSOLE_PROXY_TOKEN) is shared with ledger-console:
+	// with it, the console's X-Console-Client-IP is the client address.
+	// "" ignores those headers.
+	ConsoleToken string
 }
 
 func NewRouter(d Deps) (*gin.Engine, error) {
@@ -25,6 +29,8 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	r.Use(ConsoleClientIP(d.ConsoleToken))
 
 	h := &Handlers{auth: d.Auth, users: d.Users}
 	requireAuth := Auth(d.Sessions)

@@ -22,6 +22,10 @@ type Upstream struct {
 	Name    string        // the dependency name in logs, e.g. auth-api
 	BaseURL string        // e.g. http://api:8080; "" leaves its routes out
 	Timeout time.Duration // per call; 0 means DefaultUpstreamTimeout
+	// ConsoleToken (CONSOLE_PROXY_TOKEN, auth-api only): sent with the
+	// client's address on every call, so auth-api records the browser's
+	// address rather than the console's (#61). Never logged.
+	ConsoleToken string
 }
 
 const DefaultUpstreamTimeout = 10 * time.Second
@@ -121,6 +125,10 @@ func (p *proxy) call(c *gin.Context, method, target string, hdr http.Header, bod
 	}
 	req.Header = hdr
 	req.Header.Set("X-Request-ID", c.GetString("request_id"))
+	if p.up.ConsoleToken != "" {
+		req.Header.Set(api.HeaderConsoleToken, p.up.ConsoleToken)
+		req.Header.Set(api.HeaderConsoleClientIP, c.ClientIP())
+	}
 	if traceID := c.GetString("trace_id"); traceID != "" {
 		req.Header.Set("traceparent", "00-"+traceID+"-"+newSpanID()+"-01")
 	}

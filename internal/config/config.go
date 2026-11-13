@@ -17,15 +17,18 @@ import (
 )
 
 type Config struct {
-	ServiceName     string
-	HTTPAddr        string
-	DatabaseURL     string
-	RedisAddr       string
-	RedisPassword   string
-	RedisDB         int
-	BcryptCost      int
-	LogLevel        slog.Level
-	TrustedProxies  []string
+	ServiceName    string
+	HTTPAddr       string
+	DatabaseURL    string
+	RedisAddr      string
+	RedisPassword  string
+	RedisDB        int
+	BcryptCost     int
+	LogLevel       slog.Level
+	TrustedProxies []string
+	// ConsoleToken (CONSOLE_PROXY_TOKEN): ledger-console's X-Console-Client-IP
+	// is trusted when it carries this token; "" ignores it. Never logged.
+	ConsoleToken    string
 	ShutdownTimeout time.Duration
 }
 
@@ -39,6 +42,7 @@ func Load() (Config, error) {
 		RedisAddr:       getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:   os.Getenv("REDIS_PASSWORD"),
 		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
+		ConsoleToken:    os.Getenv("CONSOLE_PROXY_TOKEN"),
 		ShutdownTimeout: 15 * time.Second,
 	}
 
@@ -522,6 +526,7 @@ type ConsoleConfig struct {
 	OnboardingToken string // CONSOLE_ONBOARDING_TOKEN: opens accounts; never logged
 	PaymentsToken   string // CONSOLE_PAYMENTS_TOKEN: demo credits and debits; never logged
 	ReadToken       string // CONSOLE_READ_TOKEN: ledger-api's read operation, for the ops screens; never logged
+	ProxyToken      string // CONSOLE_PROXY_TOKEN: shared with auth-api, vouches for the client address it sends; never logged
 	LokiURL         string // CONSOLE_LOKI_URL: the activity signals; "" leaves them out
 	GrafanaURL      string // CONSOLE_GRAFANA_URL: Grafana as the browser reaches it, for Explore links; "" leaves them out
 	// AllowedHosts (CONSOLE_ALLOWED_HOSTS) are the Host headers the console
@@ -543,6 +548,7 @@ func LoadConsole() (ConsoleConfig, error) {
 		OnboardingToken: os.Getenv("CONSOLE_ONBOARDING_TOKEN"),
 		PaymentsToken:   os.Getenv("CONSOLE_PAYMENTS_TOKEN"),
 		ReadToken:       os.Getenv("CONSOLE_READ_TOKEN"),
+		ProxyToken:      os.Getenv("CONSOLE_PROXY_TOKEN"),
 		LokiURL:         os.Getenv("CONSOLE_LOKI_URL"),
 		GrafanaURL:      strings.TrimRight(os.Getenv("CONSOLE_GRAFANA_URL"), "/"),
 		AllowedHosts:    splitList(getEnv("CONSOLE_ALLOWED_HOSTS", "localhost:8090,127.0.0.1:8090")),

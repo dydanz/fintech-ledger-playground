@@ -234,6 +234,38 @@
           "legendFormat": "{{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Console client address refused by reason (auth.proxy)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (reason) (count_over_time({service=\"auth-api\"} | json | event=\"auth.proxy\" [5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
     }
   ]
 }
