@@ -137,3 +137,65 @@ func TestLongRunningJobStopsWhenLeaseIsLost(t *testing.T) {
 		t.Fatal("job kept running after its lease was lost")
 	}
 }
+
+// A hung leader (a frozen process: its connections stay open, but it stops
+// pinging) loses the lock after LeaseTimeout, and another replica takes over
+// (#59, chaos runbook §6.3). LeaseCheck of an hour stands in for the freeze.
+func TestHungLeaderLosesTheLock(t *testing.T) {
+	pool := pgtest.New(t)
+	var runsA, runsB atomic.Int64
+	hung := worker.NewRunner(pool, worker.Job{Name: "sweeper", Interval: time.Hour,
+		Run: func(context.Context) error { runsA.Add(1); return nil }})
+	hung.AcquireEvery, hung.LeaseCheck, hung.LeaseTimeout = time.Hour, time.Hour, 300*time.Millisecond
+	follower := worker.NewRunner(pool, worker.Job{Name: "sweeper", Interval: 20 * time.Millisecond,
+		Run: func(context.Context) error { runsB.Add(1); return nil }})
+	follower.AcquireEvery = 50 * time.Millisecond
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go hung.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+	go follower.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+	if runsA.Load() != 1 || runsB.Load() != 0 {
+		t.Fatalf("before the timeout: hung ran %d, follower ran %d", runsA.Load(), runsB.Load())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for runsB.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if runsB.Load() == 0 {
+		t.Fatal("the follower never took over from the hung leader")
+	}
+}
+
+// The lock connection's idle_session_timeout must not leak into the pool:
+// a pooled connection with it set would be killed while idle.
+func TestLeaseTimeoutIsResetBeforeTheConnectionReturnsToThePool(t *testing.T) {
+	pool := pgtest.New(t)
+	r := worker.NewRunner(pool, worker.Job{Name: "purge", Interval: 20 * time.Millisecond,
+		Run: func(context.Context) error { return nil }})
+	r.LeaseTimeout = 300 * time.Millisecond
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.Run(ctx); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	stop()
+	<-done
+
+	conns := pool.AcquireAllIdle(context.Background())
+	defer func() {
+		for _, c := range conns {
+			c.Release()
+		}
+	}()
+	if len(conns) == 0 {
+		t.Fatal("no idle connections to check")
+	}
+	for _, c := range conns {
+		var v string
+		if err := c.QueryRow(context.Background(), `SHOW idle_session_timeout`).Scan(&v); err != nil || v != "0" {
+			t.Fatalf("pooled connection has idle_session_timeout = %q (%v), want 0", v, err)
+		}
+	}
+}
