@@ -64,12 +64,16 @@ type LedgerConfig struct {
 	// Cache is the optional Redis fast path for idempotent replays (TRD
 	// §7.1). nil means Postgres only; Postgres is always the authority.
 	Cache idempotency.Cache
+	// CacheRetry is how long the ledger stops calling Redis after a cache
+	// call fails before it tries again (default 5 s).
+	CacheRetry time.Duration
 }
 
 type LedgerService struct {
-	store LedgerStore
-	cfg   LedgerConfig
-	now   func() time.Time
+	store   LedgerStore
+	cfg     LedgerConfig
+	now     func() time.Time
+	breaker *cacheBreaker
 }
 
 func NewLedgerService(store LedgerStore, cfg LedgerConfig) (*LedgerService, error) {
@@ -87,7 +91,10 @@ func NewLedgerService(store LedgerStore, cfg LedgerConfig) (*LedgerService, erro
 	if cfg.ProcessTimeout <= 0 || cfg.IdempotencyTTL <= 0 {
 		return nil, errors.New("ledger: process timeout and idempotency TTL must be positive")
 	}
-	return &LedgerService{store: store, cfg: cfg, now: time.Now}, nil
+	if cfg.CacheRetry <= 0 {
+		cfg.CacheRetry = defaultCacheRetry
+	}
+	return &LedgerService{store: store, cfg: cfg, now: time.Now, breaker: &cacheBreaker{retry: cfg.CacheRetry}}, nil
 }
 
 // EnsureSystemLedgers creates any missing double-entry counterparties
@@ -923,16 +930,17 @@ const cacheTimeout = 100 * time.Millisecond
 // operation match. Anything else (miss, mismatch, Redis down) falls through
 // to Postgres, which decides replay, 409 or 422.
 func (s *LedgerService) cachedReplay(ctx context.Context, r Request, keyHash, fp, op string) (Response, bool) {
-	if s.cfg.Cache == nil {
+	if s.cfg.Cache == nil || !s.breaker.allow(s.now()) {
 		return Response{}, false
 	}
 	cctx, cancel := context.WithTimeout(ctx, cacheTimeout)
 	defer cancel()
 	e, ok, err := s.cfg.Cache.Get(cctx, r.ClientID, keyHash)
 	if err != nil {
-		cacheUnavailable(ctx, "idempotency_get", err)
+		s.cacheFailed(ctx, "idempotency_get", err)
 		return Response{}, false
 	}
+	s.cacheOK(ctx, "idempotency_get")
 	if !ok || e.Fingerprint != fp || e.Operation != op {
 		return Response{}, false
 	}
@@ -942,18 +950,22 @@ func (s *LedgerService) cachedReplay(ctx context.Context, r Request, keyHash, fp
 // remember caches a completed response until its Postgres row expires. It is
 // best effort and runs after commit, even if the client has gone away.
 func (s *LedgerService) remember(ctx context.Context, k repository.IdempotencyKey) {
-	if s.cfg.Cache == nil || k.ResponseBody == nil {
+	if s.cfg.Cache == nil || k.ResponseBody == nil || !s.breaker.allow(s.now()) {
 		return
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cacheTimeout)
 	defer cancel()
 	if err := s.cfg.Cache.Set(cctx, k.ClientID, k.KeyHash, idempotency.Entry{Fingerprint: k.Fingerprint,
 		Operation: k.Operation, Status: k.ResponseStatus, Body: k.ResponseBody, ExpiresAt: k.ExpiresAt}); err != nil {
-		cacheUnavailable(ctx, "idempotency_set", err)
+		s.cacheFailed(ctx, "idempotency_set", err)
+		return
 	}
+	s.cacheOK(ctx, "idempotency_set")
 }
 
-func cacheUnavailable(ctx context.Context, operation string, err error) {
+// cacheUnavailable logs the failure that opened the breaker; the cache is
+// skipped for retryIn.
+func cacheUnavailable(ctx context.Context, operation string, err error, retryIn time.Duration) {
 	reason := "unknown"
 	var netErr net.Error
 	switch {
@@ -963,5 +975,6 @@ func cacheUnavailable(ctx context.Context, operation string, err error) {
 		reason = "refused"
 	}
 	logger.FromContext(ctx).WarnContext(ctx, "idempotency cache unavailable, using postgres", "event", "dependency.call",
-		"outcome", "failure", "reason", reason, "dependency", "redis", "operation", operation, "error", err)
+		"outcome", "failure", "reason", reason, "dependency", "redis", "operation", operation, "error", err,
+		"retry_in", retryIn.String())
 }
