@@ -74,7 +74,7 @@ ledger-console (new Go service: serves the built SPA + /console/api/*)
 
 **SPA** (`web/`):
 - **Stack:** React 19 with TypeScript, built with Vite.
-- **Libraries:** React Router for pages and TanStack Query for fetching and polling. No component library; plain CSS modules.
+- **Libraries:** React Router for pages and TanStack Query for fetching and polling. No component library; plain CSS. *Decided in C3 (#55):* one shared stylesheet, `web/src/styles.css`, rather than CSS modules. The screens share a small set of classes (tiles, cards, chips, the timeline), and one file keeps them consistent with no build step.
 - **Tests:** Vitest and React Testing Library.
 
 ## 5. Screens
@@ -113,7 +113,10 @@ The reviewed mockup, [`mockups/2026-11-10 console-monitor-v1.html`](mockups/2026
 ### 5.2 Transaction (`/transactions/:id`)
 
 - **Header:** type, amount, account, label.
-- **Timeline:** every event of the transaction stream, each with its time and its actor (`requested_by`, or the sweeper). The time of each step comes from the event's `occurred_at`. The steps come from three places:
+- **Timeline:** every event of the transaction stream, each with its time and its actor (`requested_by`, or the sweeper). *Built in #55:*
+  - **Processing and the final state** are written together by Tx2. They name the requesting client, or "recovery job, ledger-worker" when a `ledger.recover` line names the transaction. Without the logs, they say the logs can't tell which.
+  - **A reversal** names the void's requester.
+  - **The steps from the logs** name the outbox relay, fraud-engine or the reconciler. The time of each step comes from the event's `occurred_at`. The steps come from three places:
   - **The ledger:** the transaction's events (Requested, Processing, Settled, Failed, Voided).
   - **The logs:**
     - the sweeper's `ledger.recover`, when it completed the transaction;
@@ -187,7 +190,8 @@ A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance pe
 
 ### 6.3 What the console can't show (and says so nowhere)
 
-- **Retries per transaction:** a refused attempt never creates a transaction, and replays don't log the transaction id. So retries appear only as totals: "1,097 requests refused with 'try again'" and "N retries answered from the record, not applied again". *Possible later:* log `transaction_id` on replays.
+- **Retries per transaction:** a refused attempt never creates a transaction, and replays don't log the transaction id. So retries appear only as totals: "1,097 attempts refused with 'try again', and each retry counts" (*changed in #55:* it used to say "requests", which overstated payments; the chaos harness's `report.txt` counts requests) and "N retries answered from the record, not applied again". *Possible later:* log `transaction_id` on replays.
+- **A database outage while it lasts** (*found in #55, open as #67*): the ops role check and the ledger data both read Postgres, so the ops screens answer 503 until it's back. The "Database unavailable" banner then shows "in progress" for about 20 s, until the 15 s buckets catch up, and then resolved, with the counts.
 - **"0 lost / 0 duplicated" end to end:** that needs the client's own record, which only the chaos harness has. The console shows the server-side guarantees instead: 0 stuck, 0 timed out, and a clean reconciler.
 
 ### 6.4 Incidents and self-healing events (from Loki)
@@ -200,7 +204,7 @@ A paged list of accounts showing short id, status (ACTIVE or FROZEN), balance pe
 | Incident | Starts when | Ends when | Banner while active → when resolved |
 | :--- | :--- | :--- | :--- |
 | Kafka unavailable | first `outbox.publish` `kafka_unavailable` | `outbox.lag` back under 5 s | "Payments keep working; events are queued and will be delivered" → "N queued events delivered after Kafka recovered (T s)" |
-| Database unavailable | first ledger-api 503 `ledger_unavailable` | first 2xx write after it | "Payments are refused with 'try again'; nothing half-done is kept" → "N requests refused; M stuck payments completed by the recovery job" |
+| Database unavailable | first ledger-api 503 `ledger_unavailable` | first 2xx write after it | "Payments are refused with 'try again'; nothing half-done is kept" → "N attempts refused (each retry counts); M payments caught mid-way and completed by the recovery job" |
 | Redis unavailable | first ledger-api `dependency.call` `dependency=redis` | none for 30 s | "Payments keep working without the cache, a little slower" → duration |
 | Worker leader lost | `app.leader` `connection_lost`, or a replica stops | `app.leader` `acquired` for that job | → "Backup worker took over all jobs in T s" |
 

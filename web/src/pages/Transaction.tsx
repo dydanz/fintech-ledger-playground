@@ -82,6 +82,11 @@ function Timeline({ steps }: { steps: TimelineEntry[] }) {
             </span>{' '}
             <span className={`source ${s.source}`}>{s.source === 'ledger' ? 'ledger record' : 'logs'}</span>
           </div>
+          {s.actor && (
+            <div className="actor" data-testid="step-actor">
+              by {s.actor}
+            </div>
+          )}
           <div className="when">{when(s.at)}</div>
           {s.detail && <div>{s.detail}</div>}
         </li>

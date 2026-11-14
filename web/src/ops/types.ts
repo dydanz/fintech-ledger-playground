@@ -62,6 +62,7 @@ export type TimelineEntry = {
   title: string;
   detail?: string;
   source: 'ledger' | 'logs';
+  actor?: string; // who ran the step: the client, the recovery job, a worker
 };
 
 export type JournalLine = {

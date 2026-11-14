@@ -111,6 +111,18 @@ func (f *fakeLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			tx(txRecovered, "SETTLED", "", c, c.Add(47*time.Second)), c.Format(time.RFC3339), c.Add(47*time.Second).Format(time.RFC3339),
 			c.Add(47*time.Second).Format(time.RFC3339), c.Add(48*time.Second).Format(time.RFC3339), c.Add(48*time.Second).Format(time.RFC3339),
 			c.Add(48*time.Second).Format(time.RFC3339))
+	case r.URL.Path == "/internal/v1/transactions/"+txNormal+"/detail":
+		n := time.Date(2026, 11, 11, 7, 11, 0, 0, time.UTC)
+		_, _ = fmt.Fprintf(w, `{"transaction":%s,"events":[
+			{"type":"TransactionRequested","version":1,"payload":{"type":"DEBIT","amount":500,"requested_by":"payments"},"occurred_at":%q},
+			{"type":"TransactionProcessing","version":2,"payload":{},"occurred_at":%q},
+			{"type":"TransactionSettled","version":3,"payload":{"balance_after":99500},"occurred_at":%q}],
+			"journal":[{"ledger_kind":"USER","amount":-500},{"ledger_kind":"SYSTEM","amount":500}],
+			"outbox":[{"event_id":"n1","published_at":%q}]}`,
+			tx(txNormal, "SETTLED", "", n, n.Add(3*time.Millisecond)), n.Format(time.RFC3339Nano), n.Add(time.Millisecond).Format(time.RFC3339Nano),
+			n.Add(3*time.Millisecond).Format(time.RFC3339Nano), n.Add(500*time.Millisecond).Format(time.RFC3339Nano))
+	case r.URL.Path == "/internal/v1/transactions/"+txVoid:
+		_, _ = fmt.Fprintf(w, `{"transaction":{"id":%q,"type":"VOID","status":"SETTLED","requested_by":"ops"}}`, txVoid)
 	case r.URL.Path == "/internal/v1/transactions/"+txVoided+"/detail":
 		_, _ = fmt.Fprintf(w, `{"transaction":%s,"events":[
 			{"type":"TransactionRequested","version":1,"payload":{"requested_by":"payments"},"occurred_at":%q},
@@ -191,6 +203,9 @@ func fakeLokiServer(t *testing.T, up *atomic.Bool) *httptest.Server {
 			res = `{"resultType":"streams","result":[` + line("07:12:02", `{"event":"app.leader","state":"acquired","job":"sweeper"}`, `"service":"ledger-worker","container":"c23-ledger-worker-1"`) + `]}`
 		case strings.Contains(q, `event="ledger.reconcile"`):
 			res = `{"resultType":"streams","result":[` + line("07:12:40", `{"event":"ledger.reconcile","outcome":"success","mode":"incremental","mismatches":0}`, `"service":"ledger-worker"`) + `]}`
+		case strings.Contains(q, `event="fraud.decision"`) && strings.Contains(q, txNormal):
+			// The fraud engine reads the settled event from Kafka and freezes.
+			res = `{"resultType":"streams","result":[` + line("07:11:01", `{"event":"fraud.decision","outcome":"success","rule":"topup_velocity","transaction_id":"`+txNormal+`","account_id":"a1"}`, `"service":"fraud-engine"`) + `]}`
 		case strings.Contains(q, `event="fraud.decision"`):
 			res = `{"resultType":"streams","result":[]}`
 		default:
@@ -414,6 +429,65 @@ func TestTransactionTimeline(t *testing.T) {
 	}
 }
 
+func steps(t *testing.T, m map[string]any) []string {
+	t.Helper()
+	var out []string
+	for _, s := range dig(m, "timeline").([]any) {
+		actor, _ := dig(s, "actor").(string)
+		out = append(out, dig(s, "title").(string)+" ("+actor+")")
+	}
+	return out
+}
+
+// #55: a fraud decision on the transaction shows as a step, with its rule,
+// after the event that reached the fraud engine; and every step names who
+// ran it (D§5.2).
+func TestTransactionTimelineShowsTheFraudDecisionAndActors(t *testing.T) {
+	e := newOpsEnv(t)
+	code, m := e.get(t, "/console/api/ops/transactions/"+txNormal)
+	if code != 200 {
+		t.Fatalf("detail: %d %v", code, m)
+	}
+	want := []string{"Request received and saved (payments)", "Processing started (payments)", "Settled: money moved (payments)",
+		"Events published to Kafka (outbox relay, ledger-worker)", "Fraud engine asked to freeze the account (fraud-engine)",
+		"Verified by the reconciler (reconciler, ledger-worker)"}
+	if got := steps(t, m); strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("timeline =\n  %s\nwant\n  %s", strings.Join(got, " | "), strings.Join(want, " | "))
+	}
+	for _, s := range dig(m, "timeline").([]any) {
+		if dig(s, "title") == "Fraud engine asked to freeze the account" &&
+			(!strings.Contains(dig(s, "detail").(string), "topup_velocity") || dig(s, "source") != "logs") {
+			t.Fatalf("fraud step = %v", s)
+		}
+	}
+}
+
+// The recovery job ran Tx2 of a recovered transaction: its processing and
+// settle steps name it, not the client that asked.
+func TestRecoveredStepsNameTheRecoveryJob(t *testing.T) {
+	e := newOpsEnv(t)
+	_, m := e.get(t, "/console/api/ops/transactions/"+txRecovered)
+	want := []string{"Request received and saved (payments)", "Processing started (recovery job, ledger-worker)",
+		"Settled: money moved (recovery job, ledger-worker)", "Completed by the recovery job (recovery job, ledger-worker)",
+		"Events published to Kafka (outbox relay, ledger-worker)", "Verified by the reconciler (reconciler, ledger-worker)"}
+	if got := steps(t, m); strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("timeline =\n  %s\nwant\n  %s", strings.Join(got, " | "), strings.Join(want, " | "))
+	}
+}
+
+// Without the logs, who ran Tx2 can't be confirmed: those steps say so
+// rather than guess the client.
+func TestActorsWithoutLoki(t *testing.T) {
+	e := newOpsEnv(t)
+	e.lokiUp.Store(false)
+	_, m := e.get(t, "/console/api/ops/transactions/"+txRecovered)
+	want := []string{"Request received and saved (payments)", "Processing started (payments, or the recovery job: the logs can't say)",
+		"Settled: money moved (payments, or the recovery job: the logs can't say)", "Events published to Kafka (outbox relay, ledger-worker)"}
+	if got := steps(t, m); strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("timeline =\n  %s\nwant\n  %s", strings.Join(got, " | "), strings.Join(want, " | "))
+	}
+}
+
 // A voided original names the void that reversed it, from its
 // TransactionVoided event, so the screen can link the two.
 func TestVoidedTransactionNamesItsVoid(t *testing.T) {
@@ -421,6 +495,10 @@ func TestVoidedTransactionNamesItsVoid(t *testing.T) {
 	code, m := e.get(t, "/console/api/ops/transactions/"+txVoided)
 	if code != 200 || dig(m, "reversed_by") != txVoid || dig(m, "label", "label") != "reversed" {
 		t.Fatalf("voided detail: %d reversed_by=%v label=%v", code, dig(m, "reversed_by"), dig(m, "label"))
+	}
+	// The void's own requester reversed it.
+	if got := steps(t, m); got[len(got)-1] != "Reversed (ops)" {
+		t.Fatalf("timeline = %v, want the reversal by ops last", got)
 	}
 }
 

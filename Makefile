@@ -86,7 +86,7 @@ smoke:
 smoke-ledger: ## needs api and ledger-api running (make up)
 	./scripts/smoke-ledger.sh
 
-smoke-console: ## the web console's API end to end, incl. the fraud freeze (needs make up)
+smoke-console: ## the web console's API end to end, incl. the fraud freeze and the ops screens (needs make up; gives its throwaway user the ops role)
 	./scripts/smoke-console.sh
 
 demo-story: ## one user's money, step by step: top-up, purchases, a refund and a chargeback, then the books check. make demo-story EMAIL=you@example.com (registered first; writes real transactions)

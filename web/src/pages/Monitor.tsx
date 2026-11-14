@@ -104,7 +104,9 @@ function Tiles({ m }: { m: MonitorData }) {
       <Tile
         k="Needed recovery"
         v={signals ? num(nr.recovered + nr.refused) : 'unknown'}
-        s={nr.still_pending === 0 ? 'all completed ✓' : `${num(nr.still_pending)} still pending`}
+        s={`${num(nr.recovered)} recovered, ${num(nr.refused)} refused attempts · ${
+          nr.still_pending === 0 ? 'all completed ✓' : `${num(nr.still_pending)} still pending`
+        }`}
       />
       <Tile k="Books balanced" v={books[rc.status][0]} tone={books[rc.status][1]} s={booksSub} />
       <Tile
