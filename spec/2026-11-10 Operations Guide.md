@@ -143,3 +143,84 @@ COMPOSE_PROJECT_NAME=chaos docker compose down -v
 ## 5. Container image
 
 The `Dockerfile` builds any binary under `cmd/`, chosen with the `CMD` build arg (default `api`): `docker build --build-arg CMD=api .`. Every binary must implement a `healthcheck` subcommand, which the image uses as its container healthcheck. The runtime image is distroless and runs as non-root with a read-only root filesystem.
+
+## 6. Web console
+
+The console is `ledger-console`, at http://localhost:8090. It's bound to 127.0.0.1 and starts with `make up`. It shows whether money is being handled correctly right now, what went wrong, and how the system recovered. The [design](<2026-11-10 Web Console Design - Ledger Trust Monitor.md>) explains why it exists; this section covers running it.
+
+### 6.1 First use
+
+1. Open http://localhost:8090/register and create a user. Any email works: nothing is sent.
+2. **My account** opens a demo account and tops it up or spends from it (see §6.3).
+3. For the ops screens, give that user the ops role: `make grant-role EMAIL=you@example.com`. Sign in again, or reload, and **Monitor**, **Transactions** and **Accounts** appear. `make grant-role EMAIL=… ROLE=user` takes the role back. Each change is kept in the append-only `user_role_changes` table.
+
+### 6.2 Screens
+
+| Screen | Path | Who | What it shows |
+| :--- | :--- | :--- | :--- |
+| Monitor | `/` | ops | **Tiles** for the last 10 minutes: transactions, handled correctly, needed recovery, books balanced, events to Kafka. **Incident banners** and the **self-healing** feed look back 30 minutes. Also the live feed of the newest transactions. It polls every 3 s while the tab is visible |
+| Transactions | `/transactions` | ops | Every account's transactions, newest change first, filtered by status and type |
+| Transaction | `/transactions/:id` | ops | The timeline (each step's time and source), the double entry, the trace id with a link to its logs in Grafana, and links to a void and its original |
+| Accounts | `/accounts`, `/accounts/:id` | ops | Balances and status. An account's page adds its freeze history and its transactions, 20 at a time |
+| My account | `/me` | any user | The signed-in user's own account, with the demo actions |
+| Profile | `/profile` | any user | Name and bio, and the password change (which ends every session) |
+
+### 6.3 Demo actions
+
+On **My account**, open, top up and spend call ledger-api with the console's `onboarding` and `payments` tokens. They act on the signed-in user's own account only, in IDR, from 1 to 1,000,000 per action. Each one is logged as `console.demo_action` with `user_id`.
+
+The fraud rules are real. More than 3 top-ups in 5 minutes (`FRAUD_TOPUP_MAX`, `FRAUD_TOPUP_WINDOW`) freezes the account, and spending is then refused with `account_frozen`. An ops client unfreezes it through ledger-api's `/unfreeze`.
+
+### 6.4 Labels
+
+Every transaction carries one label, chosen from the ledger's record and the recovery job's log lines:
+
+| Label | When | Example "what happened" |
+| :--- | :--- | :--- |
+| **Normal** | Settled on the request path | "Settled in 3 ms" |
+| **Recovered** | The recovery job completed it (a `ledger.recover` line names it), whether it settled or was refused | "Completed by the recovery job after the request couldn't finish on its own" |
+| **Rejected** | Refused for a business reason: `insufficient_funds`, `account_frozen`, `not_voidable`, `ledger_not_found` | "Insufficient funds; balance unchanged" |
+| **Reversed** | Voided, or a settled void | "Reversed by a later void; the original stays on record" |
+| **Timed out** | Failed with `processing_timeout`. Shown red: look at it | "Couldn't complete in time; failed safely, nothing moved" |
+| **In progress** | Pending. Red after 60 s (NFR-7) | "Processing" |
+
+Without Loki, the console can't see the recovery job's lines. A recovered transaction then shows as **Normal**, and the screens say "Activity signals unavailable" rather than claim a recovery they can't see.
+
+### 6.5 Incidents
+
+Each banner shows "Incident in progress" while the incident lasts, then "Resolved" with what happened:
+
+| Incident | Starts | Ends |
+| :--- | :--- | :--- |
+| Database unavailable | ledger-api's first `503 ledger_unavailable` | the first successful write after it |
+| Kafka unavailable | the first `outbox.publish` `kafka_unavailable` | `outbox.lag` back under 5 s |
+| Redis unavailable | ledger-api's first `dependency.call` for Redis | none for 30 s |
+
+Worker leader changes go in the self-healing feed, not in a banner: "Ledger-worker replica <container> took leadership of 7 background jobs". A killed replica logs nothing itself, so there's no start time to show.
+
+### 6.6 Watching a chaos drill
+
+1. On a throwaway stack (stop the default one first: they publish the same ports): `COMPOSE_PROJECT_NAME=chaos make load-up`, then register a user and grant it the ops role (§6.1). `load-up` raises the fraud thresholds, so the drill's accounts aren't frozen.
+2. Open the Monitor, then in a terminal run `COMPOSE_PROJECT_NAME=chaos make chaos FAULT=kafka` (or `redis`, `postgres`, `worker`).
+3. Watch the banner for the fault. Kafka: events queue up, then drain. Postgres: payments are refused, then the recovery job completes anything caught mid-way. During a Postgres outage the ops screens themselves answer 503 (the role check and the ledger data read Postgres), so the banner shows once the database is back ([#67](https://github.com/dydanz/fintech-ledger-playground/issues/67)).
+4. Compare with the drill's `report.txt` in `chaos-results/<run>-<fault>/`. The runbook (`spec/2026-11-09 Chaos Runbook - Immutable Ledger.md`) says what each fault should do.
+
+`examples/console/` has screenshots from these drills, each with a caption.
+
+### 6.7 Configuration
+
+| Variable | Compose default | What it does |
+| :--- | :--- | :--- |
+| `CONSOLE_HTTP_ADDR` | `:8090` | Listen address |
+| `CONSOLE_AUTH_API_URL` / `CONSOLE_LEDGER_API_URL` | `http://api:8080` / `http://ledger-api:8081` | The two upstreams |
+| `CONSOLE_DEMO_ACTIONS` | `true` | Turns the My account actions on |
+| `CONSOLE_ONBOARDING_TOKEN` / `CONSOLE_PAYMENTS_TOKEN` | the dev tokens in `.env.example` | The demo actions' ledger-api clients. Never logged |
+| `CONSOLE_READ_TOKEN` | `dev-console-token` | The ops screens' ledger-api client, the read-only `console` client. Never logged |
+| `CONSOLE_LOKI_URL` | `http://loki:3100` | The activity signals. Empty leaves them out |
+| `CONSOLE_GRAFANA_URL` | `http://localhost:3000` | Grafana as your browser reaches it, for the trace id's Explore link. Empty: no link |
+| `CONSOLE_ALLOWED_HOSTS` | `localhost:8090,127.0.0.1:8090` | The `Host` headers it answers (this blocks DNS rebinding). Change it when you publish another port; use `*` only behind a proxy that checks the host |
+| `TRUSTED_PROXIES` | empty | CIDRs whose `X-Forwarded-For` it trusts |
+
+**What gets logged:**
+- `console.access` (refusals on the ops routes) and `console.demo_action`. Both have panels in `ledger.json`.
+- `dependency.call` when an upstream or Loki can't be reached. Loki's failures are logged once per outage.
