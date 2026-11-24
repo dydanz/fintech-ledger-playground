@@ -11,14 +11,14 @@ A web console, **ledger-console**, shows whether money is being handled correctl
 
 The design is in [`spec/`](spec/): the BRD, the TRD and the development plan.
 
-Blog series
+I've documented the architecture and key takeaways behind fintech-ledger-playground in a companion blog series. Read it here:
 
-Part 1 - https://dydanz.github.io/blog/ledger-money-doesnt-retry
-Part 2 - https://dydanz.github.io/blog/ledger-double-entry-journal
-Part 3 - https://dydanz.github.io/blog/ledger-event-sourcing
-Part 4 - https://dydanz.github.io/blog/ledger-idempotency-concurrency
-Part 5 - https://dydanz.github.io/blog/ledger-sync-async-outbox
-Part 6 - https://dydanz.github.io/blog/ledger-when-things-break
+Part 1 - https://dydanz.github.io/blog/ledger-money-doesnt-retry<br>
+Part 2 - https://dydanz.github.io/blog/ledger-double-entry-journal<br>
+Part 3 - https://dydanz.github.io/blog/ledger-event-sourcing<br>
+Part 4 - https://dydanz.github.io/blog/ledger-idempotency-concurrency<br>
+Part 5 - https://dydanz.github.io/blog/ledger-sync-async-outbox<br>
+Part 6 - https://dydanz.github.io/blog/ledger-when-things-break<br>
 
 ## Quick start
 
