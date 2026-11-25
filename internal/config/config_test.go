@@ -238,3 +238,29 @@ func TestLoadConsole(t *testing.T) {
 		t.Fatalf("demo actions with tokens: %+v %v", cfg, err)
 	}
 }
+
+func TestLoadMoneyOut(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("KAFKA_BROKERS", "k1:9092,k2:9092")
+	cfg, err := config.LoadMoneyOut()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HTTPAddr != ":8085" || cfg.Group != "money-out-middleware" || len(cfg.KafkaBrokers) != 2 ||
+		cfg.OutboxPoll != 200*time.Millisecond || cfg.OutboxBatch != 500 || cfg.ServiceName != "money-out-middleware" {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+}
+
+func TestLoadMoneyOutRequiresItsOwnDatabase(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "postgres://x/auth") // the core's: never used for MOM
+	if _, err := config.LoadMoneyOut(); err == nil || !strings.Contains(err.Error(), "MOM_DATABASE_URL") {
+		t.Fatalf("err = %v, want MOM_DATABASE_URL required", err)
+	}
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("OUTBOX_BATCH_SIZE", "0")
+	if _, err := config.LoadMoneyOut(); err == nil {
+		t.Fatal("OUTBOX_BATCH_SIZE=0 accepted")
+	}
+}
