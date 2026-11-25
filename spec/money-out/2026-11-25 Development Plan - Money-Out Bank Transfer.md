@@ -4,7 +4,7 @@
 
 | | |
 | :--- | :--- |
-| **Status** | Draft for review (M0). Q1 answered: **H1 approved**. Execution: **native**, with a manual gate after every phase. |
+| **Status** | Approved (#71). Q1: **H1**; Q2–Q10: the TRD's recommendations. Execution: **native**, with a manual gate after every phase. M1: #72. |
 | **Date** | 2026-11-25 |
 | **Spec** | [TRD: Money-Out](<2026-11-25 TRD - Money-Out Bank Transfer.md>) (cited `T§n`), the brief [`PROMPT-money-out`](<../2026-11-25 PROMPT-money-out.md>) (`P§n`), the bank contracts [`bank-api-stubs`](<../2026-11-25 bank-api-stubs.md>) |
 | **Repo** | `github.com/dydanz/fintech-ledger-playground` |
@@ -89,7 +89,7 @@ M0 ─▶ M1.1 contracts ─▶ M1.2 signing ─▶ M2.1 simulators+bmw runtime 
   - `## Test evidence` uses real output.
 - **Proof that the core is unchanged:** every PR shows `git diff --stat main -- internal/ledger internal/service internal/repository internal/api migrations/00[1-7]*` and that it's empty.
 
-## 3. Questions that gate work
+## 3. Questions that gate work (all answered 2026-11-25)
 
 | # | Gates | Question (T§12.2) |
 | :--- | :--- | :--- |
