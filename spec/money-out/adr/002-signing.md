@@ -28,5 +28,5 @@ A BMW has no database.
   - the body carries `request_id`, and MOM's attempt record makes a duplicate harmless at MOM's end;
   - the banks' own idempotency on the reference is a further guard.
 
-  A shared nonce store would remove this. It's listed as a question, not built.
+  A shared nonce store would remove this. **Risk accepted (2026-11-26):** per-replica caches stay, and no shared store is built.
 - Standard library only (`crypto/ed25519`). HMAC was rejected: a shared secret would let any BMW forge requests to the others.

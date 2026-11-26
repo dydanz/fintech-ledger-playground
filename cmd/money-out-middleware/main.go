@@ -107,7 +107,7 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 		"topic", contract.TopicCommands, "group", cfg.Group)
 
 	gin.SetMode(gin.ReleaseMode)
-	router, err := moapi.NewRouter(moapi.Deps{Logger: log, Transfers: store, TrustedProxies: cfg.TrustedProxies,
+	router, err := moapi.NewRouter(moapi.Deps{Logger: log, Transfers: store, TrustedProxies: cfg.TrustedProxies, Clients: cfg.Clients,
 		Ready: func(ctx context.Context) error { return errors.Join(db.Ping(ctx), consumer.Ping(ctx)) }})
 	if err != nil {
 		return err
