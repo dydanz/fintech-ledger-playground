@@ -1,4 +1,4 @@
-.PHONY: up down reset migrate migrate-version grant-role rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console demo-story logs-fraud psql
+.PHONY: up down reset migrate migrate-version grant-role rebuild-projections logs logs-ledger logs-worker kafka-topics load load-up load-credits chaos check-alerts test test-web test-integration vet smoke smoke-ledger smoke-fraud smoke-console demo-story logs-fraud psql up-money-out logs-money-out
 
 up: ## build and start everything, then load any new alert rules into Grafana
 	docker compose up -d --build
@@ -20,6 +20,12 @@ rebuild-projections: ## recompute projections from events + journal (TRD §7.6)
 
 grant-role: ## give a user a role: make grant-role EMAIL=you@example.com [ROLE=ops|user] [BY=name]. ops opens the console's ops screens; BY (default $$USER) is kept in user_role_changes
 	docker compose run --rm --no-deps api grant-role --email '$(EMAIL)' --role '$(or $(ROLE),ops)' --by '$(or $(BY),$(USER))'
+
+up-money-out: ## the stack plus money-out-middleware (profile money-out: its database, topics and service)
+	docker compose --profile money-out up -d --build
+
+logs-money-out:
+	docker compose logs -f money-out-middleware
 
 migrate-version: ## the schema version recorded by golang-migrate
 	docker compose run --rm migrate version

@@ -590,3 +590,65 @@ func LoadConsole() (ConsoleConfig, error) {
 	}
 	return cfg, errors.Join(errs...)
 }
+
+// MoneyOutConfig is money-out-middleware's configuration (spec/money-out
+// TRD §4). It has its own database (MOM_DATABASE_URL), never the core's.
+type MoneyOutConfig struct {
+	ServiceName     string
+	HTTPAddr        string // MOM_HTTP_ADDR: the read-only ops API, /healthz and /readyz
+	DatabaseURL     string // MOM_DATABASE_URL (required)
+	LogLevel        slog.Level
+	ShutdownTimeout time.Duration
+	TrustedProxies  []string
+	KafkaBrokers    []string
+	Group           string        // MOM_CONSUMER_GROUP
+	OutboxPoll      time.Duration // OUTBOX_POLL_INTERVAL
+	OutboxBatch     int           // OUTBOX_BATCH_SIZE
+	OutboxRetention time.Duration // OUTBOX_RETENTION
+	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT
+}
+
+func LoadMoneyOut() (MoneyOutConfig, error) {
+	var errs []error
+	cfg := MoneyOutConfig{
+		ServiceName:     getEnv("SERVICE_NAME", "money-out-middleware"),
+		HTTPAddr:        getEnv("MOM_HTTP_ADDR", ":8085"),
+		DatabaseURL:     os.Getenv("MOM_DATABASE_URL"),
+		TrustedProxies:  splitList(os.Getenv("TRUSTED_PROXIES")),
+		KafkaBrokers:    splitList(getEnv("KAFKA_BROKERS", "localhost:9094")),
+		Group:           getEnv("MOM_CONSUMER_GROUP", "money-out-middleware"),
+		ShutdownTimeout: 15 * time.Second,
+	}
+	if cfg.DatabaseURL == "" {
+		errs = append(errs, errors.New("MOM_DATABASE_URL is required"))
+	}
+	if len(cfg.KafkaBrokers) == 0 {
+		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
+	}
+	if err := cfg.LogLevel.UnmarshalText([]byte(getEnv("LOG_LEVEL", "info"))); err != nil {
+		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
+	}
+	var err error
+	if cfg.OutboxBatch, err = getInt("OUTBOX_BATCH_SIZE", 500); err != nil {
+		errs = append(errs, err)
+	} else if cfg.OutboxBatch < 1 || cfg.OutboxBatch > 10000 {
+		errs = append(errs, errors.New("OUTBOX_BATCH_SIZE must be between 1 and 10000"))
+	}
+	for _, d := range []struct {
+		dst *time.Duration
+		key string
+		def time.Duration
+	}{
+		{&cfg.OutboxPoll, "OUTBOX_POLL_INTERVAL", 200 * time.Millisecond},
+		{&cfg.OutboxRetention, "OUTBOX_RETENTION", 72 * time.Hour},
+		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
+		{&cfg.ShutdownTimeout, "SHUTDOWN_TIMEOUT", 15 * time.Second},
+	} {
+		if *d.dst, err = getDuration(d.key, d.def); err != nil {
+			errs = append(errs, err)
+		} else if *d.dst <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be positive", d.key))
+		}
+	}
+	return cfg, errors.Join(errs...)
+}

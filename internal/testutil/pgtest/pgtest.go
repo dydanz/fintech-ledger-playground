@@ -27,6 +27,11 @@ const EnvURL = "TEST_DATABASE_URL"
 // The test is skipped when TEST_DATABASE_URL is unset.
 func New(t testing.TB) *pgxpool.Pool {
 	t.Helper()
+	return newDB(t, "migrations")
+}
+
+func newDB(t testing.TB, dir string) *pgxpool.Pool {
+	t.Helper()
 	adminURL := os.Getenv(EnvURL)
 	if adminURL == "" {
 		t.Skipf("%s not set; skipping integration test", EnvURL)
@@ -64,10 +69,18 @@ func New(t testing.TB) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close) // runs before the DROP above (cleanups are LIFO)
 
-	if err := migrate(ctx, pool); err != nil {
+	if err := migrate(ctx, pool, dir); err != nil {
 		t.Fatalf("pgtest: %v", err)
 	}
 	return pool
+}
+
+// NewFrom is New with the up migrations of another folder, relative to the
+// repo root (e.g. "migrations/money_out" for money-out-middleware's own
+// database).
+func NewFrom(t testing.TB, dir string) *pgxpool.Pool {
+	t.Helper()
+	return newDB(t, dir)
 }
 
 // ExecMigration runs one file from migrations/ (e.g. "002_ledger.down.sql")
@@ -85,18 +98,19 @@ func ExecMigration(t testing.TB, pool *pgxpool.Pool, name string) {
 	}
 }
 
-// migrate applies every up migration in filename order.
-func migrate(ctx context.Context, pool *pgxpool.Pool) error {
+// migrate applies every up migration in dir (relative to the repo root), in
+// filename order.
+func migrate(ctx context.Context, pool *pgxpool.Pool, dir string) error {
 	root, err := repoRoot()
 	if err != nil {
 		return err
 	}
-	files, err := filepath.Glob(filepath.Join(root, "migrations", "*.up.sql"))
+	files, err := filepath.Glob(filepath.Join(root, dir, "*.up.sql"))
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
-		return errors.New("no migrations found in " + filepath.Join(root, "migrations"))
+		return errors.New("no migrations found in " + filepath.Join(root, dir))
 	}
 	sort.Strings(files)
 	for _, f := range files {
