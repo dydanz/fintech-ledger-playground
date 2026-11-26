@@ -2,7 +2,7 @@
 
 | | |
 | :--- | :--- |
-| **Status** | **Phase 0, draft for review.** Q1 answered 2026-11-25: **H1 approved** (§2.2). Q2–Q10 are still open. No code is written until this document and the [Development Plan](<2026-11-25 Development Plan - Money-Out Bank Transfer.md>) are approved. |
+| **Status** | **Phase 0, draft for review.** Approved 2026-11-25 (#71). Q1: **H1** (§2.2). Q2–Q10: **the recommendations in §12.2 accepted**. |
 | **Date** | 2026-11-25 |
 | **Brief** | [`spec/2026-11-25 PROMPT-money-out.md`](<../2026-11-25 PROMPT-money-out.md>), cited as `P§n` |
 | **Bank contracts** | [`spec/2026-11-25 bank-api-stubs.md`](<../2026-11-25 bank-api-stubs.md>), cited as `S:A`, `S:B`, `S:C` and `S:D` |
@@ -434,9 +434,9 @@ Webhooks are accepted only for a live session in this process, matching `bank_se
 8. **S:B's single transfer has no beneficiary bank code.** BCA's corporate transfer is BCA-to-BCA. So B is treated as an intrabank rail to 014, with an RTOL assumption (A).
 9. **Source account per BMW** (`sourceAccountNo`, `SourceAccountNumber`, `source_vault_id`, `funding-acct-no`) is configuration. Values come from the contract examples.
 
-### 12.2 Questions (each one changes what gets built)
+### 12.2 Questions (all answered 2026-11-25: Q1 H1; Q2–Q10 as recommended)
 
-| # | Question | My recommendation |
+| # | Question | Answer (the recommendation, accepted) |
 | :--- | :--- | :--- |
 | Q1 | Hold model (§2.2) | **Answered: H1** |
 | Q2 | A manual correction that must re-debit a user who has since spent the money | Refuse automatic re-debit. RUNBOOK escalates; ops decide (overdraft client or write-off). |
