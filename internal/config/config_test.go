@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -262,5 +263,49 @@ func TestLoadMoneyOutRequiresItsOwnDatabase(t *testing.T) {
 	t.Setenv("OUTBOX_BATCH_SIZE", "0")
 	if _, err := config.LoadMoneyOut(); err == nil {
 		t.Fatal("OUTBOX_BATCH_SIZE=0 accepted")
+	}
+}
+
+func TestLoadBankMiddleware(t *testing.T) {
+	t.Setenv("MOM_PUBLIC_KEYS", "mom-1=AAAA")
+	cfg, err := config.LoadBankMiddleware("bank-middleware-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServiceName != "bank-middleware-a" || cfg.HTTPAddr != ":8086" || cfg.SignatureSkew != 5*time.Minute ||
+		cfg.NonceCacheSize != 100000 || cfg.BankTimeout != 20*time.Second || len(cfg.KafkaBrokers) != 0 || cfg.PublicKeys != "mom-1=AAAA" {
+		t.Fatalf("defaults = %+v", cfg)
+	}
+	t.Setenv("BMW_NAME", "bank-middleware-x")
+	t.Setenv("KAFKA_BROKERS", "k:9092")
+	t.Setenv("MOM_SIGNATURE_SKEW", "2m")
+	if cfg, err = config.LoadBankMiddleware("bank-middleware-a"); err != nil || cfg.ServiceName != "bank-middleware-x" ||
+		len(cfg.KafkaBrokers) != 1 || cfg.SignatureSkew != 2*time.Minute {
+		t.Fatalf("overrides = %+v, %v", cfg, err)
+	}
+}
+
+// A bank middleware without MOM's public keys would accept nothing; refuse to start.
+func TestLoadBankMiddlewareNeedsKeys(t *testing.T) {
+	t.Setenv("MOM_PUBLIC_KEYS", "")
+	t.Setenv("MOM_PUBLIC_KEYS_FILE", "")
+	if _, err := config.LoadBankMiddleware("b"); err == nil || !strings.Contains(err.Error(), "MOM_PUBLIC_KEYS") {
+		t.Fatalf("err = %v", err)
+	}
+	f := t.TempDir() + "/keys"
+	if err := os.WriteFile(f, []byte("mom-1=BBBB\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOM_PUBLIC_KEYS_FILE", f)
+	if cfg, err := config.LoadBankMiddleware("b"); err != nil || cfg.PublicKeys != "mom-1=BBBB" {
+		t.Fatalf("from file: %+v %v", cfg, err)
+	}
+	for k, v := range map[string]string{"MOM_SIGNATURE_SKEW": "0s", "BMW_NONCE_CACHE_SIZE": "0", "BMW_BANK_TIMEOUT": "-1s"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, v)
+			if _, err := config.LoadBankMiddleware("b"); err == nil {
+				t.Fatalf("%s=%s accepted", k, v)
+			}
+		})
 	}
 }

@@ -8,7 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"fintech-ledger-playground/internal/moneyout/signing"
 )
 
 func TestKeygenWritesOnceAndKeepsExistingKeys(t *testing.T) {
@@ -29,11 +32,22 @@ func TestKeygenWritesOnceAndKeepsExistingKeys(t *testing.T) {
 	if err != nil || !pub.Equal(&k.(*rsa.PrivateKey).PublicKey) {
 		t.Fatalf("public key doesn't match: %v", err)
 	}
+	seed, _ := os.ReadFile(filepath.Join(dir, "mom-signing.key"))
+	momPriv, err := signing.ParsePrivateKey(string(seed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubs, _ := os.ReadFile(filepath.Join(dir, "mom-public.keys"))
+	keys, err := signing.ParsePublicKeys(strings.TrimSpace(string(pubs)))
+	if err != nil || !keys["mom-1"].Equal(momPriv.Public()) {
+		t.Fatalf("MOM public keys %q don't match the signing key: %v", pubs, err)
+	}
 	if err := keygen(dir); err != nil {
 		t.Fatal(err)
 	}
 	again, _ := os.ReadFile(filepath.Join(dir, "bank-a-partner.key"))
-	if string(again) != string(priv) {
+	seedAgain, _ := os.ReadFile(filepath.Join(dir, "mom-signing.key"))
+	if string(again) != string(priv) || string(seedAgain) != string(seed) {
 		t.Fatal("keygen replaced an existing key")
 	}
 }
