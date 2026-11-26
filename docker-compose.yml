@@ -9,6 +9,22 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 
+# Test-only bank simulators (spec/money-out plan M2.1), one image for all four.
+x-bank-simulator: &bank-simulator
+  build:
+    context: .
+    args:
+      CMD: bank-simulator
+  image: bank-simulator:local
+  profiles: [money-out]
+  labels:
+    logging: alloy
+  logging: *logging
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
 services:
   api:
     build:
@@ -504,6 +520,74 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # S:A's partner RSA key pair (the B2B token signature), generated once into
+  # a dev volume so no private key is committed. Root only to write the
+  # fresh volume; the files are 0644 for the nonroot services.
+  money-out-keys-init:
+    <<: *bank-simulator
+    command: ["keygen", "/keys"]
+    user: "0:0"
+    volumes:
+      - moneyoutkeys:/keys
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  bank-sim-a:
+    <<: *bank-simulator
+    environment:
+      SERVICE_NAME: bank-simulator-a
+      SIM_BANK: a
+      SIM_A_CLIENT_KEY: ${SIM_A_CLIENT_KEY:-962489e9-de5d-4eb7-92a4-b07d44d64bf5}
+      SIM_A_CLIENT_SECRET: ${SIM_A_CLIENT_SECRET:-dev-bank-a-client-secret}
+      SIM_A_PARTNER_ID: ${SIM_A_PARTNER_ID:-PG-AGG-001}
+      SIM_A_PARTNER_PUBLIC_KEY_FILE: /keys/bank-a-partner.pub
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - moneyoutkeys:/keys:ro
+    depends_on:
+      money-out-keys-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8191:8090"
+
+  bank-sim-b:
+    <<: *bank-simulator
+    environment:
+      SERVICE_NAME: bank-simulator-b
+      SIM_BANK: b
+      SIM_B_CLIENT_ID: ${SIM_B_CLIENT_ID:-bank-middleware-b}
+      SIM_B_CLIENT_SECRET: ${SIM_B_CLIENT_SECRET:-dev-bank-b-oauth-secret}
+      SIM_B_API_KEY: ${SIM_B_API_KEY:-a16c5bb4-49d1-4a12-9194-db3df367d893}
+      SIM_B_API_SECRET: ${SIM_B_API_SECRET:-dev-bank-b-api-secret}
+      SIM_B_CORPORATE_ID: ${SIM_B_CORPORATE_ID:-CORPAGG01}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8192:8090"
+
+  bank-sim-c:
+    <<: *bank-simulator
+    environment:
+      SERVICE_NAME: bank-simulator-c
+      SIM_BANK: c
+      SIM_C_API_KEY: ${SIM_C_API_KEY:-dev-bank-c-api-key}
+      SIM_C_AAA_SECRET: ${SIM_C_AAA_SECRET:-dev-bank-c-aaa-secret}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8193:8090"
+
+  bank-sim-d:
+    <<: *bank-simulator
+    environment:
+      SERVICE_NAME: bank-simulator-d
+      SIM_BANK: d
+      SIM_D_CLIENT_KEY: ${SIM_D_CLIENT_KEY:-ent_client_d_004}
+      SIM_D_SECRET: ${SIM_D_SECRET:-dev-bank-d-secret}
+      SIM_D_FUNDING_ACCT: ${SIM_D_FUNDING_ACCT:-8800112233}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8194:8090"
+
 volumes:
   pgdata:
   kafkadata:
@@ -512,3 +596,4 @@ volumes:
   alloydata:
   grafanadata:
   archivedata:
+  moneyoutkeys:
