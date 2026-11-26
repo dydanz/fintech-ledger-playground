@@ -40,13 +40,32 @@ type Signer struct {
 
 func NewSigner(kid string, key ed25519.PrivateKey) *Signer { return &Signer{kid: kid, key: key} }
 
-// Sign returns the three headers for a request, signed at now.
+// Sign returns the three headers for a request, signed at now with a fresh
+// nonce.
 func (s *Signer) Sign(method, path string, body []byte, now time.Time) (http.Header, error) {
+	nonce, err := NewNonce()
+	if err != nil {
+		return nil, err
+	}
+	return s.SignNonce(method, path, body, now, nonce)
+}
+
+// NewNonce is a 128-bit random nonce, base64url.
+func NewNonce() (string, error) {
 	n := make([]byte, 16)
 	if _, err := rand.Read(n); err != nil {
-		return nil, fmt.Errorf("signing: nonce: %w", err)
+		return "", fmt.Errorf("signing: nonce: %w", err)
 	}
-	ts, nonce := now.UTC().Format(time.RFC3339), b64.EncodeToString(n)
+	return b64.EncodeToString(n), nil
+}
+
+// SignNonce signs with a nonce the caller chose, so the body can carry the
+// same nonce and issued_at (T§3.5). The timestamp has second precision.
+func (s *Signer) SignNonce(method, path string, body []byte, at time.Time, nonce string) (http.Header, error) {
+	if nonce == "" {
+		return nil, fmt.Errorf("signing: empty nonce")
+	}
+	ts := at.UTC().Format(time.RFC3339)
 	hdr, err := json.Marshal(jwsHeader{Alg: "EdDSA", Kid: s.kid})
 	if err != nil {
 		return nil, err

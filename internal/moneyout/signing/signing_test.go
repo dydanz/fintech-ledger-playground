@@ -244,3 +244,34 @@ func TestParsePrivateKey(t *testing.T) {
 }
 
 func base64Std(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+// T§3.5: the body carries its own issued_at and nonce, so MOM picks the nonce
+// first, puts it in the body, then signs with it.
+func TestSignNonceUsesTheGivenNonceAndTime(t *testing.T) {
+	pub, priv := newKey(t)
+	nonce, err := signing.NewNonce()
+	if err != nil || len(nonce) != 22 {
+		t.Fatalf("nonce %q, %v: want 128 bits base64url", nonce, err)
+	}
+	if other, _ := signing.NewNonce(); other == nonce {
+		t.Fatal("nonces repeat")
+	}
+	at := now.Add(1500 * time.Millisecond)
+	h, err := signing.NewSigner("k1", priv).SignNonce(http.MethodPost, path, body, at, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Get(signing.HeaderNonce) != nonce || h.Get(signing.HeaderTimestamp) != "2026-11-25T02:15:01Z" {
+		t.Fatalf("headers = %v", h)
+	}
+	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	for k := range h {
+		r.Header.Set(k, h.Get(k))
+	}
+	if err := signing.NewVerifier(map[string]ed25519.PublicKey{"k1": pub}, 5*time.Minute, 10).Verify(r, body, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := signing.NewSigner("k1", priv).SignNonce(http.MethodPost, path, body, at, ""); err == nil {
+		t.Fatal("empty nonce signed")
+	}
+}
