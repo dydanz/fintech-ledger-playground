@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -28,7 +26,6 @@ import (
 	"time"
 
 	"fintech-ledger-playground/internal/bankmw"
-	"fintech-ledger-playground/internal/logger"
 	"fintech-ledger-playground/internal/moneyout/contract"
 )
 
@@ -83,9 +80,7 @@ type answer struct {
 	err        error // transport error
 }
 
-func failed(reason contract.Reason, retry, reached bool, raw string) contract.BankResult {
-	return contract.BankResult{Status: contract.StatusFailed, Reason: reason, RetryElsewhere: retry, ReachedBank: reached, BankRawCode: raw}
-}
+var failed, unknown = bankmw.Failed, bankmw.Unknown
 
 // preBank maps a call that never reached the bank's transfer logic: no
 // token, or a 401 that the retry didn't cure. ok is false otherwise.
@@ -97,10 +92,6 @@ func preBank(a answer) (contract.BankResult, bool) {
 		return failed(contract.ReasonAuthError, true, false, a.code), true
 	}
 	return contract.BankResult{}, false
-}
-
-func unknown(raw string) contract.BankResult {
-	return contract.BankResult{Status: contract.StatusUnknown, ReachedBank: true, BankRawCode: raw}
 }
 
 // Transfer: account inquiry, then the interbank transfer (T§11.1).
@@ -221,46 +212,16 @@ func (b *Bank) send(ctx context.Context, step, path string, req contract.Transfe
 	return b.do(ctx, step, hr, req)
 }
 
-// do sends hr and logs one bank.call.
+// do sends hr through bankmw.Do, reading S:A's responseCode.
 func (b *Bank) do(ctx context.Context, step string, hr *http.Request, req contract.TransferRequest) answer {
-	start := time.Now()
-	resp, err := b.client.Do(hr)
-	a := answer{err: err}
-	if err == nil {
-		a.status = resp.StatusCode
-		a.body, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
+	r := bankmw.Do(ctx, b.client, step, hr, req, func(body []byte) string {
 		var rc struct {
 			Code string `json:"responseCode"`
 		}
-		_ = json.Unmarshal(a.body, &rc)
-		a.code = rc.Code
-	} else {
-		var op *net.OpError
-		a.notReached = errors.As(err, &op) && op.Op == "dial"
-	}
-	attrs := []any{"event", "bank.call", "step", step, "http_status", a.status, "bank_raw_code", a.code,
-		"duration_ms", time.Since(start).Milliseconds()}
-	if req.TransferID != "" {
-		attrs = append(attrs, "transfer_id", req.TransferID, "request_id", req.RequestID)
-	}
-	if req.Beneficiary.AccountNo != "" {
-		attrs = append(attrs, "account", bankmw.Mask(req.Beneficiary.AccountNo))
-	}
-	log := logger.FromContext(ctx)
-	switch {
-	case err != nil:
-		reason := "timeout"
-		if a.notReached {
-			reason = "connection_refused"
-		}
-		log.WarnContext(ctx, "bank call failed", append(attrs, "outcome", "failure", "reason", reason)...)
-	case a.status/100 != 2:
-		log.WarnContext(ctx, "bank call refused", append(attrs, "outcome", "failure", "reason", "http_"+strconv.Itoa(a.status))...)
-	default:
-		log.InfoContext(ctx, "bank call", append(attrs, "outcome", "success")...)
-	}
-	return a
+		_ = json.Unmarshal(body, &rc)
+		return rc.Code
+	})
+	return answer{status: r.Status, code: r.Code, body: r.Body, notReached: r.NotReached, err: r.Err}
 }
 
 // accessToken returns the cached token, or fetches one (S:A step 1). On

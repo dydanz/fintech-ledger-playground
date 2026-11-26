@@ -627,6 +627,43 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  bank-middleware-b:
+    build:
+      context: .
+      args:
+        CMD: bank-middleware-b
+    image: bank-middleware-b:local
+    profiles: [money-out]
+    environment:
+      SERVICE_NAME: bank-middleware-b
+      BMW_NAME: bank-middleware-b
+      BMW_HTTP_ADDR: ":8086"
+      MOM_PUBLIC_KEYS_FILE: /keys/mom-public.keys
+      BANK_B_BASE_URL: http://bank-sim-b:8090
+      BANK_B_CLIENT_ID: ${SIM_B_CLIENT_ID:-bank-middleware-b}
+      BANK_B_CLIENT_SECRET: ${SIM_B_CLIENT_SECRET:-dev-bank-b-oauth-secret}
+      BANK_B_API_KEY: ${SIM_B_API_KEY:-a16c5bb4-49d1-4a12-9194-db3df367d893}
+      BANK_B_API_SECRET: ${SIM_B_API_SECRET:-dev-bank-b-api-secret}
+      BANK_B_CORPORATE_ID: ${SIM_B_CORPORATE_ID:-CORPAGG01}
+      BANK_B_SOURCE_ACCOUNT: ${BANK_B_SOURCE_ACCOUNT:-0201245680}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - moneyoutkeys:/keys:ro
+    ports:
+      - "127.0.0.1:8182:8086"
+    depends_on:
+      money-out-keys-init:
+        condition: service_completed_successfully
+      bank-sim-b:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   pgdata:
   kafkadata:
