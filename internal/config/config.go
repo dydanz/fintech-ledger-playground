@@ -595,8 +595,9 @@ func LoadConsole() (ConsoleConfig, error) {
 // TRD §4). It has its own database (MOM_DATABASE_URL), never the core's.
 type MoneyOutConfig struct {
 	ServiceName     string
-	HTTPAddr        string // MOM_HTTP_ADDR: the read-only ops API, /healthz and /readyz
-	DatabaseURL     string // MOM_DATABASE_URL (required)
+	HTTPAddr        string           // MOM_HTTP_ADDR: the read-only ops API, /healthz and /readyz
+	DatabaseURL     string           // MOM_DATABASE_URL (required)
+	Clients         []MoneyOutClient // MOM_CLIENTS (required): who may call the ops API
 	LogLevel        slog.Level
 	ShutdownTimeout time.Duration
 	TrustedProxies  []string
@@ -621,6 +622,11 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("MOM_DATABASE_URL is required"))
+	}
+	if clients, err := ParseMoneyOutClients(os.Getenv("MOM_CLIENTS")); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.Clients = clients
 	}
 	if len(cfg.KafkaBrokers) == 0 {
 		errs = append(errs, errors.New("KAFKA_BROKERS is required"))
