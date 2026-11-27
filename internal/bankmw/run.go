@@ -34,6 +34,7 @@ type Built struct {
 	Bank   Bank
 	Routes func(*gin.Engine)
 	Ready  func(ctx context.Context) error
+	Stop   func() // optional: stops the bank's own goroutines (S:D's pollers) at shutdown
 }
 
 // Main is every bank middleware's main: healthcheck, configuration, then
@@ -94,6 +95,10 @@ func Setup(cfg config.BankMiddlewareConfig, log *slog.Logger, build func(Env) (B
 	if err != nil {
 		cleanup()
 		return nil, nil, err
+	}
+	if built.Stop != nil {
+		closeProducer := cleanup
+		cleanup = func() { built.Stop(); closeProducer() } // pollers stop before the producer closes
 	}
 	r, err := NewRouter(Deps{Name: cfg.ServiceName, Logger: log, Bank: built.Bank, Verifier: v, Ready: built.Ready,
 		TrustedProxies: cfg.TrustedProxies, Routes: built.Routes})

@@ -97,3 +97,32 @@ func TestSetupLogsNonceCacheOverCap(t *testing.T) {
 		t.Fatalf("bank.nonce_cache logged %d times, want 1: %s", n, logs.String())
 	}
 }
+
+// An async bank's pollers stop when the process does: cleanup calls Stop.
+func TestSetupCleanupStopsTheBank(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	stopped := 0
+	_, cleanup, err := bankmw.Setup(cfg("mom-1="+signing.EncodeKey(pub)), slog.Default(),
+		func(bankmw.Env) (bankmw.Built, error) {
+			return bankmw.Built{Bank: &fakeBank{}, Stop: func() { stopped++ }}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped != 0 {
+		t.Fatal("stopped before cleanup")
+	}
+	cleanup()
+	if stopped != 1 {
+		t.Fatalf("Stop called %d times, want 1", stopped)
+	}
+	// A router error after the build still stops what was built.
+	stopped = 0
+	c := cfg("mom-1=" + signing.EncodeKey(pub))
+	c.TrustedProxies = []string{"not-an-address"}
+	if _, _, err := bankmw.Setup(c, slog.Default(), func(bankmw.Env) (bankmw.Built, error) {
+		return bankmw.Built{Bank: &fakeBank{}, Stop: func() { stopped++ }}, nil
+	}); err == nil || stopped != 1 {
+		t.Fatalf("err = %v, stopped = %d: want an error and Stop called once", err, stopped)
+	}
+}
