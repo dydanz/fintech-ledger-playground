@@ -198,7 +198,7 @@ All in this module and repo, so adding a bank is a new `cmd/bank-middleware-<ban
 | Path | What |
 | :--- | :--- |
 | `cmd/payout-adapter`, `internal/payout` | The core's outbound port and result consumer (§2.1) |
-| `cmd/money-out-middleware` | MOM: HTTP ops API, consumers, and `worker.Runner` jobs (outbox relay, dispatcher, inquiry scheduler, reconciliation) |
+| `cmd/money-out-middleware` | MOM: HTTP ops API (bearer client token from `MOM_CLIENTS`; probes open), consumers, and `worker.Runner` jobs (outbox relay, dispatcher, inquiry scheduler, reconciliation) |
 | `internal/moneyout/transfer` | State machine: states, transition table, `Apply`, `ErrIllegalTransition`, as in `internal/ledger` |
 | `internal/moneyout/routing` | Rule interface, chain, config loader with reload |
 | `internal/moneyout/breaker` | Per `(bank_middleware, rail)` breaker on the shared database |

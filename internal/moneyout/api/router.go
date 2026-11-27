@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	coreapi "fintech-ledger-playground/internal/api"
+	"fintech-ledger-playground/internal/config"
 	"fintech-ledger-playground/internal/ledger"
 	"fintech-ledger-playground/internal/moneyout/contract"
 	"fintech-ledger-playground/internal/moneyout/repository"
@@ -29,15 +30,20 @@ type Deps struct {
 	Transfers      TransferReader
 	Ready          func(ctx context.Context) error // the database, for /readyz
 	TrustedProxies []string
+	Clients        []config.MoneyOutClient // MOM_CLIENTS: required, every ops route needs one
 }
 
 func NewRouter(d Deps) (*gin.Engine, error) {
+	if len(d.Clients) == 0 {
+		return nil, errors.New("moneyout api: no clients configured")
+	}
 	r, err := coreapi.NewBaseEngine(d.Logger, d.TrustedProxies, d.Ready)
 	if err != nil {
 		return nil, err
 	}
 	h := &handlers{transfers: d.Transfers}
-	r.GET("/transfers/:transfer_id", h.getTransfer)
+	ops := r.Group("/", requireClient(d.Clients))
+	ops.GET("/transfers/:transfer_id", h.getTransfer)
 	return r, nil
 }
 

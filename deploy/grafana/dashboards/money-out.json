@@ -173,6 +173,38 @@
       ]
     },
     {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Ops API rejections by reason (transfer.client_auth)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.client_auth\" [5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
       "id": 7,
       "type": "timeseries",
       "title": "Bank middlewares: MOM requests rejected by reason (bank.request_verify)",

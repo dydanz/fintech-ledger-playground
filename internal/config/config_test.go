@@ -242,6 +242,7 @@ func TestLoadConsole(t *testing.T) {
 
 func TestLoadMoneyOut(t *testing.T) {
 	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
 	t.Setenv("KAFKA_BROKERS", "k1:9092,k2:9092")
 	cfg, err := config.LoadMoneyOut()
 	if err != nil {
@@ -260,6 +261,7 @@ func TestLoadMoneyOutRequiresItsOwnDatabase(t *testing.T) {
 		t.Fatalf("err = %v, want MOM_DATABASE_URL required", err)
 	}
 	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
 	t.Setenv("OUTBOX_BATCH_SIZE", "0")
 	if _, err := config.LoadMoneyOut(); err == nil {
 		t.Fatal("OUTBOX_BATCH_SIZE=0 accepted")
@@ -307,5 +309,41 @@ func TestLoadBankMiddlewareNeedsKeys(t *testing.T) {
 				t.Fatalf("%s=%s accepted", k, v)
 			}
 		})
+	}
+}
+
+// The ops API fails closed: no MOM_CLIENTS, no start.
+func TestLoadMoneyOutRequiresClients(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "")
+	if _, err := config.LoadMoneyOut(); err == nil || !strings.Contains(err.Error(), "MOM_CLIENTS") {
+		t.Fatalf("err = %v, want MOM_CLIENTS required", err)
+	}
+}
+
+func TestParseMoneyOutClients(t *testing.T) {
+	const h1, h2 = "9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21", "ff15c6028c0197f8656b2745adece2ee0d037a6695303abaf56af4b89f64d57e"
+	got, err := config.ParseMoneyOutClients(" ops:" + strings.ToUpper(h1) + " ; console:" + h2 + ";")
+	if err != nil || len(got) != 2 || got[0].ID != "ops" || got[0].TokenHash != h1 || got[1].ID != "console" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	for name, v := range map[string]string{
+		"empty":          " ; ",
+		"no hash":        "ops",
+		"extra field":    "ops:" + h1 + ":read",
+		"short hash":     "ops:abc123",
+		"non-hex hash":   "ops:" + strings.Repeat("z", 64),
+		"bad id":         "Ops Team:" + h1,
+		"duplicate id":   "ops:" + h1 + ";ops:" + h2,
+		"duplicate hash": "ops:" + h1 + ";console:" + h1,
+	} {
+		_, err := config.ParseMoneyOutClients(v)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if strings.Contains(strings.ToLower(err.Error()), h1) {
+			t.Errorf("%s: error contains the hash: %v", name, err)
+		}
 	}
 }
