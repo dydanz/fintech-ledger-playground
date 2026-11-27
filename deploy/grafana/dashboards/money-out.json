@@ -299,6 +299,38 @@
           "legendFormat": "{{service}} {{event}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Bank API calls by step and outcome (bank.call)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (service, step, outcome, reason) (count_over_time({service=~\"bank-middleware-.+\"} | json | event=\"bank.call\" [5m]))",
+          "legendFormat": "{{service}} {{step}} {{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }

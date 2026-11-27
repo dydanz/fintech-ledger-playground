@@ -3,15 +3,17 @@
 // fault injection on /_sim. Never deploy it next to real money.
 //
 //	bank-simulator               serve
-//	bank-simulator keygen DIR    create S:A's RSA partner key pair in DIR, if missing
+//	bank-simulator keygen DIR    create the dev keys in DIR, if missing (S:A's RSA pair, MOM's Ed25519 pair)
 //	bank-simulator healthcheck   the container healthcheck
 package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -32,6 +34,7 @@ import (
 	"fintech-ledger-playground/internal/banksim/stubc"
 	"fintech-ledger-playground/internal/banksim/stubd"
 	"fintech-ledger-playground/internal/logger"
+	"fintech-ledger-playground/internal/moneyout/signing"
 	"fintech-ledger-playground/internal/startup"
 )
 
@@ -169,10 +172,15 @@ func getEnv(k, def string) string {
 	return def
 }
 
-// keygen creates S:A's partner key pair (the aggregator's RSA-2048 key for
-// the B2B token signature) in dir, unless it exists. Generated at stack
-// start, never committed.
+// keygen creates the dev keys in dir, each unless it exists: S:A's partner
+// key pair (the aggregator's RSA-2048 key for the B2B token signature), and
+// MOM's Ed25519 request-signing key (mom-signing.key, the MOM_SIGNING_KEY
+// seed) with its public half (mom-public.keys, for MOM_PUBLIC_KEYS_FILE).
+// Generated at stack start, never committed.
 func keygen(dir string) error {
+	if err := momKeygen(dir); err != nil {
+		return err
+	}
 	priv, pub := filepath.Join(dir, "bank-a-partner.key"), filepath.Join(dir, "bank-a-partner.pub")
 	if _, err := os.Stat(priv); err == nil {
 		return nil
@@ -194,6 +202,21 @@ func keygen(dir string) error {
 		return err
 	}
 	return os.WriteFile(priv, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o644)
+}
+
+func momKeygen(dir string) error {
+	seedFile, pubFile := filepath.Join(dir, "mom-signing.key"), filepath.Join(dir, "mom-public.keys")
+	if _, err := os.Stat(seedFile); err == nil {
+		return nil
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(pubFile, []byte("mom-1="+signing.EncodeKey(pub)+"\n"), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(seedFile, []byte(base64.StdEncoding.EncodeToString(priv.Seed())+"\n"), 0o644)
 }
 
 func loadRSAPublic(path string) (*rsa.PublicKey, error) {

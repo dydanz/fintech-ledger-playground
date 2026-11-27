@@ -521,9 +521,10 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  # S:A's partner RSA key pair (the B2B token signature), generated once into
-  # a dev volume so no private key is committed. Root only to write the
-  # fresh volume; the files are 0644 for the nonroot services.
+  # Dev keys, generated once into a volume so no private key is committed:
+  # S:A's partner RSA pair (the B2B token signature) and MOM's Ed25519
+  # request-signing pair. Root only to write the fresh volume; the files are
+  # 0644 for the nonroot services.
   money-out-keys-init:
     <<: *bank-simulator
     command: ["keygen", "/keys"]
@@ -588,6 +589,44 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8194:8090"
+
+  # Bank middlewares (spec/money-out TRD §3.5): stateless, MOM-signed
+  # requests only. Host ports 127.0.0.1:8181… for manual checks.
+  bank-middleware-a:
+    build:
+      context: .
+      args:
+        CMD: bank-middleware-a
+    image: bank-middleware-a:local
+    profiles: [money-out]
+    environment:
+      SERVICE_NAME: bank-middleware-a
+      BMW_NAME: bank-middleware-a
+      BMW_HTTP_ADDR: ":8086"
+      MOM_PUBLIC_KEYS_FILE: /keys/mom-public.keys
+      BANK_A_BASE_URL: http://bank-sim-a:8090
+      BANK_A_CLIENT_KEY: ${SIM_A_CLIENT_KEY:-962489e9-de5d-4eb7-92a4-b07d44d64bf5}
+      BANK_A_CLIENT_SECRET: ${SIM_A_CLIENT_SECRET:-dev-bank-a-client-secret}
+      BANK_A_PARTNER_ID: ${SIM_A_PARTNER_ID:-PG-AGG-001}
+      BANK_A_PRIVATE_KEY_FILE: /keys/bank-a-partner.key
+      BANK_A_SOURCE_ACCOUNT: ${BANK_A_SOURCE_ACCOUNT:-000101002345501}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - moneyoutkeys:/keys:ro
+    ports:
+      - "127.0.0.1:8181:8086"
+    depends_on:
+      money-out-keys-init:
+        condition: service_completed_successfully
+      bank-sim-a:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
 volumes:
   pgdata:
