@@ -363,6 +363,70 @@
           "legendFormat": "{{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Bank C: webhooks by outcome and reason (bank.webhook)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, stage, reason) (count_over_time({service=\"bank-middleware-c\"} | json | event=\"bank.webhook\" [5m]))",
+          "legendFormat": "{{outcome}} {{stage}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Bank C: sessions ended by outcome and reason (bank.session)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason, executed) (count_over_time({service=\"bank-middleware-c\"} | json | event=\"bank.session\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}} executed={{executed}}"
+        }
+      ]
     }
   ]
 }

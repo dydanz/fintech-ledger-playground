@@ -665,6 +665,49 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Async multi-ACK: answers ACCEPTED, runs the ACK-1 / AAA / ACK-2 / execute
+  # handshake in memory with bank-sim-c's webhooks, and publishes PROCESSING
+  # and the terminal status to money-out.bank-events.v1 (T§11.3).
+  bank-middleware-c:
+    build:
+      context: .
+      args:
+        CMD: bank-middleware-c
+    image: bank-middleware-c:local
+    profiles: [money-out]
+    environment:
+      SERVICE_NAME: bank-middleware-c
+      BMW_NAME: bank-middleware-c
+      BMW_HTTP_ADDR: ":8086"
+      MOM_PUBLIC_KEYS_FILE: /keys/mom-public.keys
+      KAFKA_BROKERS: kafka:9092
+      BANK_C_BASE_URL: http://bank-sim-c:8090
+      BANK_C_API_KEY: ${SIM_C_API_KEY:-dev-bank-c-api-key}
+      BANK_C_AAA_SECRET: ${SIM_C_AAA_SECRET:-dev-bank-c-aaa-secret}
+      BANK_C_SOURCE_VAULT_ID: ${BANK_C_SOURCE_VAULT_ID:-VAULT-PG-881}
+      BANK_C_CALLBACK_BASE_URL: http://bank-middleware-c:8086/callbacks/bank-c
+      BANK_C_POLL_INTERVAL: ${BANK_C_POLL_INTERVAL:-5s}
+      BANK_C_POLL_FOR: ${BANK_C_POLL_FOR:-30m}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - moneyoutkeys:/keys:ro
+    ports:
+      - "127.0.0.1:8183:8086"
+    depends_on:
+      money-out-keys-init:
+        condition: service_completed_successfully
+      money-out-kafka-init:
+        condition: service_completed_successfully
+      bank-sim-c:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
   # Async: answers ACCEPTED, then polls remit-status and publishes PROCESSING
   # and the terminal status to money-out.bank-events.v1 (T§11.4).
   bank-middleware-d:

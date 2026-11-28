@@ -390,6 +390,7 @@ The whole handshake runs inside the BMW. MOM sees `ACCEPTED → PROCESSING → t
 | Execute `final_state: SETTLED` | SUCCEEDED | `bank_reference = core_settlement_id` |
 | Execute timeout or 5xx | UNKNOWN | Then the status poll |
 | Deadline passed **before** execute was sent | FAILED | `OTHER`, true: funds can't have moved |
+| ACK-1 or ACK-2 never arrives (dropped) | the status poll runs alongside; `EXPIRED` → FAILED | `OTHER`, true: the token exists only in ACK-2, so a dropped ACK-2 is never executed (agreed 2026-11-27, P§5 #9) |
 | Status poll `final_state: SETTLED` | SUCCEEDED | — |
 | Status poll other `final_state` **(A: values not in the contract)** | per value, else UNKNOWN | — |
 | Restart with no session in memory | poll status; if it can't be determined, UNKNOWN | Never re-executes: `execute` is sent only by the process holding the token |
@@ -429,7 +430,7 @@ Webhooks are accepted only for a live session in this process, matching `bank_se
 3. **S:D's `canonicalBody` isn't defined.** Assumed: the minified JSON request body.
 4. **S:D's `remit-status` is shown only for a `batch-ticket`.** For a single remittance, assumed: the same route with `data.pg-order-id`.
 5. **S:C's webhooks carry no signature or authentication.** Only `X-BankC-Event`. The BMW can validate the session and stage (P§4), but anyone who learns a session id could forge an ACK. That's a real gap (Q8).
-6. **S:C's execution token isn't computed.** The bank *issues* it in ACK-2 (P§2.5 says it is computed). Only the AAA hash and HMAC are computed.
+6. **S:C's execution token isn't computed.** The bank *issues* it in ACK-2 (P§2.5 says it is computed). Only the AAA hash and HMAC are computed. Because the token is delivered only in the ACK-2 webhook (the status poll doesn't return it), a dropped ACK-2 can't be recovered into an execute: it ends `FAILED OTHER` once the bank reports `EXPIRED` (agreed 2026-11-27).
 7. **S:C debits a fee from our vault on top of the amount** (`debited_amt = remit_amt + fee_amt`). The beneficiary gets the full amount. Who bears the fee (Q9)?
 8. **S:B's single transfer has no beneficiary bank code.** BCA's corporate transfer is BCA-to-BCA. So B is treated as an intrabank rail to 014, with an RTOL assumption (A).
 9. **Source account per BMW** (`sourceAccountNo`, `SourceAccountNumber`, `source_vault_id`, `funding-acct-no`) is configuration. Values come from the contract examples.
