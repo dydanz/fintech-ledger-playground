@@ -347,3 +347,92 @@ func TestParseMoneyOutClients(t *testing.T) {
 		}
 	}
 }
+
+// The routing file and how often it's checked for a change (P§3.1).
+func TestLoadMoneyOutRouting(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
+	cfg, err := config.LoadMoneyOut()
+	if err != nil || cfg.RoutingFile != "config/money-out/routing.yaml" || cfg.RoutingReload != 5*time.Second {
+		t.Fatalf("defaults = %q %s, %v", cfg.RoutingFile, cfg.RoutingReload, err)
+	}
+	t.Setenv("MOM_ROUTING_FILE", "/etc/money-out/routing.yaml")
+	t.Setenv("MOM_ROUTING_RELOAD", "1s")
+	if cfg, err = config.LoadMoneyOut(); err != nil || cfg.RoutingFile != "/etc/money-out/routing.yaml" || cfg.RoutingReload != time.Second {
+		t.Fatalf("overrides = %q %s, %v", cfg.RoutingFile, cfg.RoutingReload, err)
+	}
+	t.Setenv("MOM_ROUTING_RELOAD", "0s")
+	if _, err := config.LoadMoneyOut(); err == nil {
+		t.Fatal("MOM_ROUTING_RELOAD=0s accepted")
+	}
+}
+
+// Dispatch (M4.2) is on when MOM_BANK_MIDDLEWARES names endpoints; then
+// MOM's signing key is required and the timings must fit together.
+func TestLoadMoneyOutDispatch(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
+	cfg, err := config.LoadMoneyOut()
+	if err != nil || len(cfg.BankMiddlewares) != 0 {
+		t.Fatalf("without endpoints: %+v, %v", cfg.BankMiddlewares, err)
+	}
+	t.Setenv("MOM_BANK_MIDDLEWARES", "bank-middleware-a=http://bank-middleware-a:8086, bank-middleware-b=http://bank-middleware-b:8086")
+	if _, err := config.LoadMoneyOut(); err == nil || !strings.Contains(err.Error(), "MOM_SIGNING_KEY") {
+		t.Fatalf("err = %v, want the signing key required", err)
+	}
+	t.Setenv("MOM_SIGNING_KEY", "c2VlZA==")
+	cfg, err = config.LoadMoneyOut()
+	if err != nil || cfg.BankMiddlewares["bank-middleware-b"] != "http://bank-middleware-b:8086" || len(cfg.BankMiddlewares) != 2 ||
+		cfg.SigningKey != "c2VlZA==" || cfg.SigningKID != "mom-1" || cfg.BMWTimeout != 25*time.Second || cfg.InquiryInterval != 5*time.Second ||
+		cfg.InquiryFor != 30*time.Minute || cfg.StaleDispatch != time.Minute || cfg.RetryBase != time.Second || cfg.RetryMax != 30*time.Second ||
+		cfg.BankEventsGroup != "money-out-middleware-bank-events" {
+		t.Fatalf("cfg = %+v, %v", cfg, err)
+	}
+	f := t.TempDir() + "/mom-signing.key"
+	if err := os.WriteFile(f, []byte("ZmlsZQ==\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MOM_SIGNING_KEY", "")
+	t.Setenv("MOM_SIGNING_KEY_FILE", f)
+	if cfg, err = config.LoadMoneyOut(); err != nil || cfg.SigningKey != "ZmlsZQ==" {
+		t.Fatalf("from file: %q, %v", cfg.SigningKey, err)
+	}
+	for k, v := range map[string]string{
+		"MOM_STALE_DISPATCH":   "20s", // not longer than MOM_BMW_TIMEOUT: a live call would be inquired as stale
+		"MOM_BANK_MIDDLEWARES": "bank-middleware-a",
+		"MOM_RETRY_MAX":        "100ms", // below MOM_RETRY_BASE
+	} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, v)
+			if _, err := config.LoadMoneyOut(); err == nil {
+				t.Fatalf("%s=%s accepted", k, v)
+			}
+		})
+	}
+}
+
+// Circuit breaker thresholds (P§3.3). The probe timeout is
+// MOM_STALE_DISPATCH: a probe older than that was interrupted.
+func TestLoadMoneyOutBreaker(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
+	cfg, err := config.LoadMoneyOut()
+	b := cfg.Breaker
+	if err != nil || b.Failures != 5 || b.Window != time.Minute || b.ErrorRatePercent != 50 || b.MinCalls != 10 || b.Cooldown != 30*time.Second ||
+		b.Probes != 1 || b.ProbeTimeout != cfg.StaleDispatch {
+		t.Fatalf("defaults = %+v, %v", b, err)
+	}
+	t.Setenv("MOM_BREAKER_FAILURES", "3")
+	t.Setenv("MOM_BREAKER_COOLDOWN", "5s")
+	if cfg, err = config.LoadMoneyOut(); err != nil || cfg.Breaker.Failures != 3 || cfg.Breaker.Cooldown != 5*time.Second {
+		t.Fatalf("overrides = %+v, %v", cfg.Breaker, err)
+	}
+	for k, v := range map[string]string{"MOM_BREAKER_FAILURES": "0", "MOM_BREAKER_ERROR_RATE": "120", "MOM_BREAKER_PROBES": "0"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, v)
+			if _, err := config.LoadMoneyOut(); err == nil {
+				t.Fatalf("%s=%s accepted", k, v)
+			}
+		})
+	}
+}

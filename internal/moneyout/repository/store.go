@@ -46,23 +46,38 @@ type Transfer struct {
 	RequestedAt       time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	CandidateIndex    int        // the routing candidate the next or current attempt uses
+	SameNodeRetries   int        // retries of that candidate so far (P§3.3)
+	NextDispatchAt    *time.Time // not before: a same-node retry's backoff
+	ReviewReason      string     // why NEEDS_MANUAL_REVIEW: inquiry_deadline or late_event
 }
 
 // Attempt is a row of attempts.
 type Attempt struct {
-	TransferID     string
-	AttemptNo      int
-	RequestID      string
-	BankMiddleware string
-	Rail           string
-	Status         string
-	Reason         string
-	RetryElsewhere bool
-	ReachedBank    bool
-	BankReference  string
-	BankRawCode    string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	TransferID      string
+	AttemptNo       int
+	RequestID       string
+	BankMiddleware  string
+	Rail            string
+	Status          string
+	Reason          string
+	RetryElsewhere  bool
+	ReachedBank     bool
+	BankReference   string
+	BankRawCode     string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	NextInquiryAt   *time.Time
+	InquiryDeadline *time.Time
+}
+
+// Open reports an attempt still in flight.
+func (a Attempt) Open() bool {
+	switch a.Status {
+	case "DISPATCHING", "ACCEPTED", "PROCESSING", "UNKNOWN":
+		return true
+	}
+	return false
 }
 
 // Notifier wakes the outbox relay after a commit that wrote outbox rows
@@ -106,14 +121,14 @@ func (s *Store) InTx(ctx context.Context, fn func(*Tx) error) error {
 
 const transferColumns = `transfer_id, payload_hash, amount, currency, bank_code, account_no, metadata,
 	coalesce(core_transaction_id, ''), state, version, routing, current_attempt, core_ack, trace_id,
-	requested_at, created_at, updated_at`
+	requested_at, created_at, updated_at, candidate_index, same_node_retries, next_dispatch_at, coalesce(review_reason, '')`
 
 func scanTransfer(row pgx.Row) (Transfer, error) {
 	var t Transfer
 	var state string
 	err := row.Scan(&t.ID, &t.PayloadHash, &t.Amount, &t.Currency, &t.BankCode, &t.AccountNo, &t.Metadata,
 		&t.CoreTransactionID, &state, &t.Version, &t.Routing, &t.CurrentAttempt, &t.CoreAck, &t.TraceID,
-		&t.RequestedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.RequestedAt, &t.CreatedAt, &t.UpdatedAt, &t.CandidateIndex, &t.SameNodeRetries, &t.NextDispatchAt, &t.ReviewReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Transfer{}, ErrNotFound
 	}
@@ -130,23 +145,35 @@ func (s *Store) GetTransfer(ctx context.Context, id string) (Transfer, []Attempt
 		}
 		return Transfer{}, nil, fmt.Errorf("get transfer: %w", err)
 	}
-	rows, err := s.db.Query(ctx, `SELECT transfer_id, attempt_no, request_id, bank_middleware, rail, status,
-		coalesce(reason, ''), retry_elsewhere, reached_bank, coalesce(bank_reference, ''), coalesce(bank_raw_code, ''),
-		created_at, updated_at FROM attempts WHERE transfer_id = $1 ORDER BY attempt_no`, id)
+	rows, err := s.db.Query(ctx, `SELECT `+attemptColumns+` FROM attempts WHERE transfer_id = $1 ORDER BY attempt_no`, id)
 	if err != nil {
 		return Transfer{}, nil, fmt.Errorf("list attempts: %w", err)
 	}
 	defer rows.Close()
 	var out []Attempt
 	for rows.Next() {
-		var a Attempt
-		if err := rows.Scan(&a.TransferID, &a.AttemptNo, &a.RequestID, &a.BankMiddleware, &a.Rail, &a.Status, &a.Reason,
-			&a.RetryElsewhere, &a.ReachedBank, &a.BankReference, &a.BankRawCode, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		a, err := scanAttempt(rows)
+		if err != nil {
 			return Transfer{}, nil, fmt.Errorf("list attempts: %w", err)
 		}
 		out = append(out, a)
 	}
 	return t, out, rows.Err()
+}
+
+const attemptColumns = `transfer_id::text, attempt_no, request_id::text, bank_middleware, rail, status, coalesce(reason, ''),
+	retry_elsewhere, reached_bank, coalesce(bank_reference, ''), coalesce(bank_raw_code, ''), created_at, updated_at,
+	next_inquiry_at, inquiry_deadline`
+
+func scanAttempt(row pgx.Row) (Attempt, error) {
+	var a Attempt
+	err := row.Scan(&a.TransferID, &a.AttemptNo, &a.RequestID, &a.BankMiddleware, &a.Rail, &a.Status, &a.Reason,
+		&a.RetryElsewhere, &a.ReachedBank, &a.BankReference, &a.BankRawCode, &a.CreatedAt, &a.UpdatedAt,
+		&a.NextInquiryAt, &a.InquiryDeadline)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Attempt{}, ErrNotFound
+	}
+	return a, err
 }
 
 // Tx is one transaction's view of the store.
@@ -273,4 +300,165 @@ func nullJSON(b json.RawMessage) any {
 		return nil
 	}
 	return b
+}
+
+// ListInState returns up to limit transfer ids in state, oldest change
+// first. A worker then locks each one and re-checks its state.
+func (s *Store) ListInState(ctx context.Context, state transfer.State, limit int) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT transfer_id::text FROM transfers WHERE state = $1 ORDER BY updated_at LIMIT $2`, string(state), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", state, err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list %s: %w", state, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// TryLockTransfer reads a transfer FOR UPDATE SKIP LOCKED: ok is false when
+// another worker holds it.
+func (x *Tx) TryLockTransfer(ctx context.Context, id string) (t Transfer, ok bool, err error) {
+	t, err = scanTransfer(x.tx.QueryRow(ctx, `SELECT `+transferColumns+` FROM transfers WHERE transfer_id = $1 FOR UPDATE SKIP LOCKED`, id))
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return Transfer{}, false, nil
+	case err != nil:
+		return Transfer{}, false, fmt.Errorf("lock transfer: %w", err)
+	}
+	return t, true, nil
+}
+
+// SetRouting stores the routing decision (P§3.1).
+func (x *Tx) SetRouting(ctx context.Context, id string, routing json.RawMessage) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET routing = $2, updated_at = now() WHERE transfer_id = $1`, id, routing); err != nil {
+		return fmt.Errorf("set routing: %w", err)
+	}
+	return nil
+}
+
+// SetCoreAckPending marks that a terminal result went to the core and its
+// acknowledgement is awaited (P§3.4a #4).
+func (x *Tx) SetCoreAckPending(ctx context.Context, id string) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET core_ack = 'pending', updated_at = now() WHERE transfer_id = $1 AND core_ack = 'none'`, id); err != nil {
+		return fmt.Errorf("set core_ack: %w", err)
+	}
+	return nil
+}
+
+// ListDispatchable returns up to limit transfers waiting for an attempt
+// (ROUTED, or ATTEMPT_FAILED with a next candidate or a retry due).
+func (s *Store) ListDispatchable(ctx context.Context, now time.Time, limit int) ([]string, error) {
+	return s.ids(ctx, `SELECT transfer_id::text FROM transfers WHERE state IN ('ROUTED', 'ATTEMPT_FAILED')
+		AND (next_dispatch_at IS NULL OR next_dispatch_at <= $1) ORDER BY updated_at LIMIT $2`, now, limit)
+}
+
+// AttemptRef names an attempt.
+type AttemptRef struct {
+	TransferID string
+	AttemptNo  int
+}
+
+// ListInquiriesDue returns up to limit current, open attempts whose next
+// inquiry is due, on transfers still in flight.
+func (s *Store) ListInquiriesDue(ctx context.Context, now time.Time, limit int) ([]AttemptRef, error) {
+	rows, err := s.db.Query(ctx, `SELECT a.transfer_id::text, a.attempt_no FROM attempts a JOIN transfers t USING (transfer_id)
+		WHERE a.status IN ('DISPATCHING', 'ACCEPTED', 'PROCESSING', 'UNKNOWN') AND a.next_inquiry_at <= $1
+		AND t.current_attempt = a.attempt_no AND t.state IN ('DISPATCHING', 'ACCEPTED', 'PROCESSING', 'UNKNOWN')
+		ORDER BY a.next_inquiry_at LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list inquiries: %w", err)
+	}
+	defer rows.Close()
+	var out []AttemptRef
+	for rows.Next() {
+		var r AttemptRef
+		if err := rows.Scan(&r.TransferID, &r.AttemptNo); err != nil {
+			return nil, fmt.Errorf("list inquiries: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ids(ctx context.Context, q string, args ...any) ([]string, error) {
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// AttemptByRequestID finds an attempt by the request_id a bank event names.
+func (s *Store) AttemptByRequestID(ctx context.Context, requestID string) (Attempt, error) {
+	a, err := scanAttempt(s.db.QueryRow(ctx, `SELECT `+attemptColumns+` FROM attempts WHERE request_id = $1`, requestID))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return Attempt{}, fmt.Errorf("attempt by request_id: %w", err)
+	}
+	return a, err
+}
+
+// GetAttempt reads one attempt; the caller holds the transfer's lock.
+func (x *Tx) GetAttempt(ctx context.Context, transferID string, attemptNo int) (Attempt, error) {
+	a, err := scanAttempt(x.tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM attempts WHERE transfer_id = $1 AND attempt_no = $2`, transferID, attemptNo))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return Attempt{}, fmt.Errorf("get attempt: %w", err)
+	}
+	return a, err
+}
+
+// UpdateAttempt writes an attempt's status, result and inquiry schedule.
+func (x *Tx) UpdateAttempt(ctx context.Context, a Attempt) error {
+	_, err := x.tx.Exec(ctx, `UPDATE attempts SET status = $3, reason = nullif($4, ''), retry_elsewhere = $5, reached_bank = $6,
+		bank_reference = nullif($7, ''), bank_raw_code = nullif($8, ''), next_inquiry_at = $9, inquiry_deadline = $10, updated_at = now()
+		WHERE transfer_id = $1 AND attempt_no = $2`, a.TransferID, a.AttemptNo, a.Status, a.Reason, a.RetryElsewhere, a.ReachedBank,
+		a.BankReference, a.BankRawCode, a.NextInquiryAt, a.InquiryDeadline)
+	if err != nil {
+		return fmt.Errorf("update attempt: %w", err)
+	}
+	return nil
+}
+
+// SetCurrentAttempt points the transfer at its new attempt and clears the
+// dispatch schedule.
+func (x *Tx) SetCurrentAttempt(ctx context.Context, transferID string, attemptNo int) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET current_attempt = $2, next_dispatch_at = NULL, updated_at = now() WHERE transfer_id = $1`,
+		transferID, attemptNo); err != nil {
+		return fmt.Errorf("set current attempt: %w", err)
+	}
+	return nil
+}
+
+// SetDispatchPlan records which candidate goes next, its retry count and
+// when (P§3.3).
+func (x *Tx) SetDispatchPlan(ctx context.Context, transferID string, candidateIndex, retries int, at *time.Time) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET candidate_index = $2, same_node_retries = $3, next_dispatch_at = $4, updated_at = now()
+		WHERE transfer_id = $1`, transferID, candidateIndex, retries, at); err != nil {
+		return fmt.Errorf("set dispatch plan: %w", err)
+	}
+	return nil
+}
+
+// SetReviewReason records why a transfer is parked; late_event is never
+// replaced by inquiry_deadline.
+func (x *Tx) SetReviewReason(ctx context.Context, transferID, reason string) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET review_reason = CASE WHEN review_reason = 'late_event' THEN review_reason ELSE $2 END,
+		updated_at = now() WHERE transfer_id = $1`, transferID, reason); err != nil {
+		return fmt.Errorf("set review reason: %w", err)
+	}
+	return nil
 }

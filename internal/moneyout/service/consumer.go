@@ -30,10 +30,29 @@ type Consumer struct {
 	recv       Receiver
 	minBackoff time.Duration
 	maxBackoff time.Duration
+	pollOp     string // dependency.call operation names, and the event for an undecodable message
+	commitOp   string
+	refuse     string
+	refuseMsg  string
 }
 
 func NewConsumer(p Poller, r Receiver, minBackoff, maxBackoff time.Duration) *Consumer {
-	return &Consumer{poll: p, recv: r, minBackoff: minBackoff, maxBackoff: maxBackoff}
+	return &Consumer{poll: p, recv: r, minBackoff: minBackoff, maxBackoff: maxBackoff,
+		pollOp: "money_out_poll", commitOp: "money_out_commit", refuse: "transfer.receive", refuseMsg: "transfer command refused"}
+}
+
+// WithNames sets the log names for a consumer of another topic.
+func (c *Consumer) WithNames(pollOp, commitOp, refuseEvent string) *Consumer {
+	c.pollOp, c.commitOp, c.refuse, c.refuseMsg = pollOp, commitOp, refuseEvent, "message refused"
+	return c
+}
+
+// HandlerFunc adapts a function to Receiver, for a topic whose handler has
+// no transfer or outcome to return (money-out.bank-events.v1).
+type HandlerFunc func(ctx context.Context, e contract.Envelope) error
+
+func (f HandlerFunc) Receive(ctx context.Context, e contract.Envelope) (repository.Transfer, Outcome, error) {
+	return repository.Transfer{}, "", f(ctx, e)
 }
 
 // Run consumes until ctx ends.
@@ -46,14 +65,14 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 		if err != nil {
 			log.WarnContext(ctx, "commands topic poll failed", "event", "dependency.call", "outcome", "failure",
-				"reason", "unknown", "dependency", "kafka", "operation", "money_out_poll", "error", err)
+				"reason", "unknown", "dependency", "kafka", "operation", c.pollOp, "error", err)
 			sleep(ctx, c.maxBackoff)
 			continue
 		}
 		for _, m := range msgs {
 			e, err := contract.DecodeEnvelope(m.Value)
 			if err != nil {
-				log.WarnContext(ctx, "transfer command refused", "event", "transfer.receive", "outcome", "denied",
+				log.WarnContext(ctx, c.refuseMsg, "event", c.refuse, "outcome", "denied",
 					"reason", "invalid_input", "detail", "not a JSON envelope", "partition", m.Partition, "offset", m.Offset)
 				continue
 			}
@@ -69,7 +88,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 		if len(msgs) > 0 {
 			if err := c.poll.Commit(ctx, msgs); err != nil && ctx.Err() == nil {
 				log.WarnContext(ctx, "commands offset commit failed", "event", "dependency.call", "outcome", "failure",
-					"reason", "unknown", "dependency", "kafka", "operation", "money_out_commit", "error", err)
+					"reason", "unknown", "dependency", "kafka", "operation", c.commitOp, "error", err)
 			}
 		}
 	}

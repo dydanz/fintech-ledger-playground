@@ -427,6 +427,198 @@
           "legendFormat": "{{outcome}} {{reason}} executed={{executed}}"
         }
       ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Routing: transfers routed or failed for no candidate (transfer.route)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason, result_reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.route\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}} {{result_reason}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Routing config: reloads and rejected files (transfer.routing_config, failure should be 0)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.routing_config\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Dispatch: bank middleware calls by outcome (transfer.dispatch, transfer.inquiry)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, bank_middleware, outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=~\"transfer.dispatch|transfer.inquiry\" [5m]))",
+          "legendFormat": "{{event}} {{bank_middleware}} {{outcome}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Late bank events for given-up attempts: possible double payments (transfer.late_event, should be 0)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (bank_middleware, status, parked) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.late_event\" [5m]))",
+          "legendFormat": "{{bank_middleware}} {{status}} parked={{parked}}"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Bank events received and refused, and transfers parked (transfer.bank_event, transfer.review)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=~\"transfer.bank_event|transfer.review\" [5m]))",
+          "legendFormat": "{{event}} {{outcome}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Circuit breakers: transitions by target state (transfer.breaker)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (bank_middleware, rail, to_state, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.breaker\" [5m]))",
+          "legendFormat": "{{bank_middleware}}/{{rail}} \u2192 {{to_state}} {{reason}}"
+        }
+      ]
     }
   ]
 }
