@@ -491,6 +491,102 @@
           "legendFormat": "{{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Dispatch: bank middleware calls by outcome (transfer.dispatch, transfer.inquiry)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, bank_middleware, outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=~\"transfer.dispatch|transfer.inquiry\" [5m]))",
+          "legendFormat": "{{event}} {{bank_middleware}} {{outcome}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Late bank events for given-up attempts: possible double payments (transfer.late_event, should be 0)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (bank_middleware, status, parked) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.late_event\" [5m]))",
+          "legendFormat": "{{bank_middleware}} {{status}} parked={{parked}}"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Bank events received and refused, and transfers parked (transfer.bank_event, transfer.review)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (event, outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=~\"transfer.bank_event|transfer.review\" [5m]))",
+          "legendFormat": "{{event}} {{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }

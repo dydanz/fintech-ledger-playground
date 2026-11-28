@@ -37,6 +37,25 @@ type BankMiddleware struct {
 	Enabled  *bool    `yaml:"enabled"` // default true
 	Rails    []string `yaml:"rails"`
 	HomeBank string   `yaml:"home_bank"` // the bank its source account is at; INTRABANK goes only there
+	// SameNodeRetries is how often a request that provably never reached
+	// the bank is retried on this middleware before failing over (P§3.3).
+	SameNodeRetries *int `yaml:"same_node_retries"` // default 2
+}
+
+const defaultSameNodeRetries = 2
+
+// SameNodeRetries is name's same-node retry limit; 0 for a name not
+// configured.
+func (c *Config) SameNodeRetries(name string) int {
+	for _, b := range c.BankMiddlewares {
+		if b.Name == name {
+			if b.SameNodeRetries == nil {
+				return defaultSameNodeRetries
+			}
+			return *b.SameNodeRetries
+		}
+	}
+	return 0
 }
 
 func (b BankMiddleware) enabled() bool { return b.Enabled == nil || *b.Enabled }
@@ -140,6 +159,8 @@ func (c *Config) validate() error {
 			bad("%s: home_bank must be 3 digits", b.Name)
 		case slices.Contains(b.Rails, RailIntrabank) && b.HomeBank == "":
 			bad("%s: INTRABANK needs a home_bank", b.Name)
+		case b.SameNodeRetries != nil && (*b.SameNodeRetries < 0 || *b.SameNodeRetries > 10):
+			bad("%s: same_node_retries must be 0-10", b.Name)
 		}
 		names[b.Name] = true
 		for _, r := range b.Rails {

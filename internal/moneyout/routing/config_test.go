@@ -190,3 +190,23 @@ func TestWatcherNeedsAValidFileAtStart(t *testing.T) {
 		t.Fatal("started without a file")
 	}
 }
+
+// Same-node retries are per bank middleware (P§3.3): 2 unless set.
+func TestSameNodeRetries(t *testing.T) {
+	c := chain(t, strings.Replace(sample, `{name: bmw-c, rails: [BIFAST]}`, `{name: bmw-c, rails: [BIFAST], same_node_retries: 0}`, 1))
+	if got := c.Config().SameNodeRetries("bmw-a"); got != 2 {
+		t.Fatalf("default = %d, want 2", got)
+	}
+	if got := c.Config().SameNodeRetries("bmw-c"); got != 0 {
+		t.Fatalf("bmw-c = %d, want 0", got)
+	}
+	if got := c.Config().SameNodeRetries("not-configured"); got != 0 {
+		t.Fatalf("unknown BMW = %d, want 0", got)
+	}
+	for _, bad := range []string{"-1", "11"} {
+		if _, err := routing.Parse([]byte(strings.Replace(sample, `{name: bmw-c, rails: [BIFAST]}`,
+			`{name: bmw-c, rails: [BIFAST], same_node_retries: `+bad+`}`, 1))); err == nil {
+			t.Fatalf("same_node_retries %s accepted", bad)
+		}
+	}
+}

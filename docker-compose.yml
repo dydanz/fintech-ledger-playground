@@ -505,18 +505,27 @@ services:
       MOM_DATABASE_URL: postgres://${POSTGRES_USER:-auth}:${POSTGRES_PASSWORD:-auth_dev_password}@postgres:5432/money_out?sslmode=disable
       MOM_CLIENTS: ${MOM_CLIENTS:-ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21}
       MOM_ROUTING_FILE: /etc/money-out/routing.yaml
+      # Dispatch (M4.2): the bank middlewares routing.yaml names, and MOM's
+      # request-signing key (money-out-keys-init writes it once).
+      MOM_BANK_MIDDLEWARES: >-
+        bank-middleware-a=http://bank-middleware-a:8086,bank-middleware-b=http://bank-middleware-b:8086,
+        bank-middleware-c=http://bank-middleware-c:8086,bank-middleware-d=http://bank-middleware-d:8086
+      MOM_SIGNING_KEY_FILE: /keys/mom-signing.key
       KAFKA_BROKERS: kafka:9092
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       # Edit config/money-out/routing.yaml on the host: MOM reloads it within
       # MOM_ROUTING_RELOAD, and keeps the live chain if the edit is invalid.
       - ./config/money-out:/etc/money-out:ro
+      - moneyoutkeys:/keys:ro
     ports:
       - "127.0.0.1:8085:8085"
     depends_on:
       migrate-money-out:
         condition: service_completed_successfully
       money-out-kafka-init:
+        condition: service_completed_successfully
+      money-out-keys-init:
         condition: service_completed_successfully
     labels:
       logging: alloy

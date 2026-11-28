@@ -609,6 +609,35 @@ type MoneyOutConfig struct {
 	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT
 	RoutingFile     string        // MOM_ROUTING_FILE: config/money-out/routing.yaml (P§3.1)
 	RoutingReload   time.Duration // MOM_ROUTING_RELOAD: how often the file is checked for a change
+
+	// Dispatch (M4.2): on when BankMiddlewares is set.
+	BankMiddlewares map[string]string // MOM_BANK_MIDDLEWARES: name=base URL, comma separated
+	SigningKey      string            // MOM_SIGNING_KEY or MOM_SIGNING_KEY_FILE: the Ed25519 seed, base64
+	SigningKID      string            // MOM_SIGNING_KID: the kid the bank middlewares know it by
+	BMWTimeout      time.Duration     // MOM_BMW_TIMEOUT: one call to a bank middleware
+	InquiryInterval time.Duration     // MOM_INQUIRY_INTERVAL
+	InquiryFor      time.Duration     // MOM_INQUIRY_FOR: then NEEDS_MANUAL_REVIEW
+	StaleDispatch   time.Duration     // MOM_STALE_DISPATCH: a DISPATCHING attempt this old is inquired
+	RetryBase       time.Duration     // MOM_RETRY_BASE: same-node retry backoff
+	RetryMax        time.Duration     // MOM_RETRY_MAX
+	BankEventsGroup string            // MOM_BANK_EVENTS_GROUP: consumer group on money-out.bank-events.v1
+}
+
+// parseEndpoints reads "name=url,name=url".
+func parseEndpoints(s string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, item := range splitList(s) {
+		name, url, ok := strings.Cut(item, "=")
+		name, url = strings.TrimSpace(name), strings.TrimSpace(url)
+		if !ok || name == "" || !(strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
+			return nil, fmt.Errorf("MOM_BANK_MIDDLEWARES: %q is not name=http(s)://host", item)
+		}
+		if _, dup := out[name]; dup {
+			return nil, fmt.Errorf("MOM_BANK_MIDDLEWARES: %s listed twice", name)
+		}
+		out[name] = strings.TrimRight(url, "/")
+	}
+	return out, nil
 }
 
 func LoadMoneyOut() (MoneyOutConfig, error) {
@@ -622,6 +651,24 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 		Group:           getEnv("MOM_CONSUMER_GROUP", "money-out-middleware"),
 		ShutdownTimeout: 15 * time.Second,
 		RoutingFile:     getEnv("MOM_ROUTING_FILE", "config/money-out/routing.yaml"),
+		SigningKID:      getEnv("MOM_SIGNING_KID", "mom-1"),
+		BankEventsGroup: getEnv("MOM_BANK_EVENTS_GROUP", "money-out-middleware-bank-events"),
+	}
+	if eps, err := parseEndpoints(os.Getenv("MOM_BANK_MIDDLEWARES")); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.BankMiddlewares = eps
+	}
+	cfg.SigningKey = os.Getenv("MOM_SIGNING_KEY")
+	if f := os.Getenv("MOM_SIGNING_KEY_FILE"); cfg.SigningKey == "" && f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("MOM_SIGNING_KEY_FILE: %w", err))
+		}
+		cfg.SigningKey = strings.TrimSpace(string(b))
+	}
+	if len(cfg.BankMiddlewares) > 0 && cfg.SigningKey == "" {
+		errs = append(errs, errors.New("MOM_SIGNING_KEY or MOM_SIGNING_KEY_FILE is required with MOM_BANK_MIDDLEWARES"))
 	}
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("MOM_DATABASE_URL is required"))
@@ -653,12 +700,24 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
 		{&cfg.ShutdownTimeout, "SHUTDOWN_TIMEOUT", 15 * time.Second},
 		{&cfg.RoutingReload, "MOM_ROUTING_RELOAD", 5 * time.Second},
+		{&cfg.BMWTimeout, "MOM_BMW_TIMEOUT", 25 * time.Second},
+		{&cfg.InquiryInterval, "MOM_INQUIRY_INTERVAL", 5 * time.Second},
+		{&cfg.InquiryFor, "MOM_INQUIRY_FOR", 30 * time.Minute},
+		{&cfg.StaleDispatch, "MOM_STALE_DISPATCH", time.Minute},
+		{&cfg.RetryBase, "MOM_RETRY_BASE", time.Second},
+		{&cfg.RetryMax, "MOM_RETRY_MAX", 30 * time.Second},
 	} {
 		if *d.dst, err = getDuration(d.key, d.def); err != nil {
 			errs = append(errs, err)
 		} else if *d.dst <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be positive", d.key))
 		}
+	}
+	if cfg.StaleDispatch <= cfg.BMWTimeout {
+		errs = append(errs, errors.New("MOM_STALE_DISPATCH must be longer than MOM_BMW_TIMEOUT: a call still in flight isn't stale"))
+	}
+	if cfg.RetryMax < cfg.RetryBase {
+		errs = append(errs, errors.New("MOM_RETRY_MAX must be at least MOM_RETRY_BASE"))
 	}
 	return cfg, errors.Join(errs...)
 }
