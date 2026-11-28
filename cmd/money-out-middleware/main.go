@@ -6,7 +6,8 @@
 // It routes each RECEIVED transfer with the rule chain in MOM_ROUTING_FILE,
 // reloaded when the file changes (M4.1), and, with MOM_BANK_MIDDLEWARES set,
 // dispatches signed attempts to the bank middlewares, retries, fails over,
-// inquires open attempts and applies their bank events (M4.2).
+// inquires open attempts and applies their bank events (M4.2), with a
+// circuit breaker per bank middleware and rail (M4.3).
 // Reconciliation arrives in M6.
 package main
 
@@ -62,12 +63,6 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	defer stop()
 	ctx = logger.WithContext(ctx, log)
 
-	// No routing, no start: there's no previous chain to fall back on.
-	routes, err := routing.NewWatcher(ctx, cfg.RoutingFile)
-	if err != nil {
-		return err
-	}
-
 	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 16)
 	if err != nil {
 		return err
@@ -76,6 +71,13 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	notifier := outbox.NewNotifier(db, 10*time.Millisecond)
 	go notifier.Run(ctx)
 	store := repository.NewStore(db).WithNotifier(notifier)
+	breakers := service.NewBreakers(store, cfg.Breaker)
+
+	// No routing, no start: there's no previous chain to fall back on.
+	routes, err := routing.NewWatcher(ctx, cfg.RoutingFile, routing.Deps{Breakers: breakers})
+	if err != nil {
+		return err
+	}
 
 	producer, err := kafka.NewProducer(cfg.KafkaBrokers, contract.TopicJournal)
 	if err != nil {
@@ -117,7 +119,8 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 		}
 		client := bmwclient.New(signing.NewSigner(cfg.SigningKID, key), cfg.BankMiddlewares, &http.Client{Timeout: cfg.BMWTimeout})
 		dispatch = service.NewDispatch(store, routes, client, service.DispatchConfig{InquiryInterval: cfg.InquiryInterval,
-			InquiryFor: cfg.InquiryFor, StaleDispatch: cfg.StaleDispatch, RetryBase: cfg.RetryBase, RetryMax: cfg.RetryMax})
+			InquiryFor: cfg.InquiryFor, StaleDispatch: cfg.StaleDispatch, RetryBase: cfg.RetryBase, RetryMax: cfg.RetryMax}).
+			WithBreakers(breakers)
 		jobs = append(jobs,
 			worker.Job{Name: "dispatcher", Interval: 200 * time.Millisecond, Run: dispatch.RunDispatch},
 			worker.Job{Name: "inquiries", Interval: min(cfg.InquiryInterval, time.Second), Run: dispatch.RunInquiries})
@@ -131,10 +134,14 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
 		routes.Run(ctx, cfg.RoutingReload)
+	}()
+	go func() { // every instance: the breaker_open rule reads it
+		defer wg.Done()
+		breakers.RunRefresh(ctx, time.Second)
 	}()
 	go func() {
 		defer wg.Done()
@@ -156,7 +163,17 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 		"topic", contract.TopicCommands, "group", cfg.Group)
 
 	gin.SetMode(gin.ReleaseMode)
+	pairs := func() [][2]string {
+		var out [][2]string
+		for _, b := range routes.Chain().Config().BankMiddlewares {
+			for _, r := range b.Rails {
+				out = append(out, [2]string{b.Name, r})
+			}
+		}
+		return out
+	}
 	router, err := moapi.NewRouter(moapi.Deps{Logger: log, Transfers: store, TrustedProxies: cfg.TrustedProxies, Clients: cfg.Clients,
+		Breakers: breakers, Pairs: pairs,
 		Ready: func(ctx context.Context) error { return errors.Join(db.Ping(ctx), consumer.Ping(ctx)) }})
 	if err != nil {
 		return err

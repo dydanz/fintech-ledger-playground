@@ -77,14 +77,32 @@ type Window struct {
 // Factory builds a rule from the configuration.
 type Factory func(*Config) (Rule, error)
 
+// BreakerView says whether a candidate's circuit breaker is open (M4.3).
+type BreakerView interface {
+	Open(bankMiddleware, rail string) bool
+}
+
+// Deps are what a rule may need beyond the configuration.
+type Deps struct {
+	Breakers BreakerView // nil: no breaker is open
+}
+
+// DepFactory builds a rule that needs Deps.
+type DepFactory func(*Config, Deps) (Rule, error)
+
 var (
 	registryMu sync.RWMutex
-	registry   = map[string]Factory{}
+	registry   = map[string]DepFactory{}
 )
 
 // Register adds a rule class under name, for routing.yaml's rules list
 // (P§3.1: new rules without changing the chain). It panics on a duplicate.
 func Register(name string, f Factory) {
+	RegisterDep(name, func(c *Config, _ Deps) (Rule, error) { return f(c) })
+}
+
+// RegisterDep is Register for a rule that needs Deps.
+func RegisterDep(name string, f DepFactory) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, dup := registry[name]; dup {
@@ -101,7 +119,10 @@ var (
 
 // Parse validates a routing.yaml and builds its chain. Unknown keys, rules
 // and rails are errors: a typo must not silently change routing.
-func Parse(b []byte) (*Chain, error) {
+func Parse(b []byte) (*Chain, error) { return ParseWith(b, Deps{}) }
+
+// ParseWith is Parse with the rules' dependencies.
+func ParseWith(b []byte, deps Deps) (*Chain, error) {
 	var cfg Config
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -120,7 +141,7 @@ func Parse(b []byte) (*Chain, error) {
 		if !ok {
 			return nil, fmt.Errorf("routing: unknown rule %q", name)
 		}
-		r, err := f(&cfg)
+		r, err := f(&cfg, deps)
 		if err != nil {
 			return nil, fmt.Errorf("routing: rule %s: %w", name, err)
 		}

@@ -16,6 +16,7 @@ import (
 	coreapi "fintech-ledger-playground/internal/api"
 	"fintech-ledger-playground/internal/config"
 	"fintech-ledger-playground/internal/ledger"
+	"fintech-ledger-playground/internal/moneyout/breaker"
 	"fintech-ledger-playground/internal/moneyout/contract"
 	"fintech-ledger-playground/internal/moneyout/repository"
 )
@@ -31,6 +32,13 @@ type Deps struct {
 	Ready          func(ctx context.Context) error // the database, for /readyz
 	TrustedProxies []string
 	Clients        []config.MoneyOutClient // MOM_CLIENTS: required, every ops route needs one
+	Breakers       BreakerLister           // nil: no breakers yet, all CLOSED
+	Pairs          func() [][2]string      // every (bank_middleware, rail) the routing knows
+}
+
+// BreakerLister reads the circuit breakers (service.Breakers).
+type BreakerLister interface {
+	List(ctx context.Context) ([]breaker.Row, error)
 }
 
 func NewRouter(d Deps) (*gin.Engine, error) {
@@ -41,13 +49,18 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &handlers{transfers: d.Transfers}
+	h := &handlers{transfers: d.Transfers, breakers: d.Breakers, pairs: d.Pairs}
 	ops := r.Group("/", requireClient(d.Clients))
 	ops.GET("/transfers/:transfer_id", h.getTransfer)
+	ops.GET("/bank-middlewares/health", h.health)
 	return r, nil
 }
 
-type handlers struct{ transfers TransferReader }
+type handlers struct {
+	transfers TransferReader
+	breakers  BreakerLister
+	pairs     func() [][2]string
+}
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
@@ -60,6 +73,7 @@ type transferView struct {
 	CoreTransactionID string               `json:"core_transaction_id,omitempty"`
 	CoreAck           string               `json:"core_ack"`
 	CurrentAttempt    int                  `json:"current_attempt"`
+	ReviewReason      string               `json:"review_reason,omitempty"` // why NEEDS_MANUAL_REVIEW
 	Routing           json.RawMessage      `json:"routing,omitempty"`
 	RequestedAt       time.Time            `json:"requested_at"`
 	CreatedAt         time.Time            `json:"created_at"`
@@ -102,7 +116,7 @@ func (h *handlers) getTransfer(c *gin.Context) {
 	view := transferView{TransferID: t.ID, State: string(t.State), Version: t.Version,
 		Amount:      contract.AmountOf(ledger.Money{Amount: t.Amount, Currency: t.Currency}),
 		Beneficiary: contract.Beneficiary{BankCode: t.BankCode, AccountNo: t.AccountNo}, CoreTransactionID: t.CoreTransactionID,
-		CoreAck: t.CoreAck, CurrentAttempt: t.CurrentAttempt, Routing: t.Routing, RequestedAt: t.RequestedAt,
+		CoreAck: t.CoreAck, CurrentAttempt: t.CurrentAttempt, ReviewReason: t.ReviewReason, Routing: t.Routing, RequestedAt: t.RequestedAt,
 		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
 	views := make([]attemptView, 0, len(attempts))
 	for _, a := range attempts {
@@ -111,4 +125,63 @@ func (h *handlers) getTransfer(c *gin.Context) {
 			BankReference: a.BankReference, BankRawCode: a.BankRawCode, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt})
 	}
 	c.JSON(http.StatusOK, gin.H{"transfer": view, "attempts": views})
+}
+
+type breakerView struct {
+	BankMiddleware      string     `json:"bank_middleware"`
+	Rail                string     `json:"rail"`
+	State               string     `json:"state"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	Calls               int        `json:"calls"`    // in the current window
+	Failures            int        `json:"failures"` // in the current window
+	OpenedAt            *time.Time `json:"opened_at,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+}
+
+// GET /bank-middlewares/health: the circuit breaker of every (bank
+// middleware, rail) the routing knows (P§3.3, P§3.6).
+func (h *handlers) health(c *gin.Context) {
+	var rows []breaker.Row
+	if h.breakers != nil {
+		var err error
+		if rows, err = h.breakers.List(c.Request.Context()); err != nil {
+			_ = c.Error(err)
+			coreapi.AbortError(c, http.StatusServiceUnavailable, "unavailable", "money-out-middleware temporarily unavailable")
+			return
+		}
+	}
+	byPair := map[[2]string]breaker.Row{}
+	for _, r := range rows {
+		byPair[[2]string{r.BankMiddleware, r.Rail}] = r
+	}
+	var pairs [][2]string
+	if h.pairs != nil {
+		pairs = h.pairs()
+	}
+	seen := map[[2]string]bool{}
+	out := make([]breakerView, 0, len(pairs))
+	add := func(p [2]string) {
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+		v := breakerView{BankMiddleware: p[0], Rail: p[1], State: string(breaker.Closed)}
+		if r, ok := byPair[p]; ok {
+			v.State, v.ConsecutiveFailures, v.Calls, v.Failures = string(r.State), r.Consecutive, r.Calls, r.Failures
+			if !r.OpenedAt.IsZero() {
+				v.OpenedAt = &r.OpenedAt
+			}
+			if !r.UpdatedAt.IsZero() {
+				v.UpdatedAt = &r.UpdatedAt
+			}
+		}
+		out = append(out, v)
+	}
+	for _, p := range pairs {
+		add(p)
+	}
+	for _, r := range rows { // a breaker for a pair the routing no longer lists
+		add([2]string{r.BankMiddleware, r.Rail})
+	}
+	c.JSON(http.StatusOK, gin.H{"bank_middlewares": out})
 }

@@ -46,7 +46,12 @@ type Dispatch struct {
 	bank   BankClient
 	cfg    DispatchConfig
 	now    func() time.Time
+	brk    *Breakers // nil: no breakers (every candidate allowed)
 }
+
+// WithBreakers makes each new attempt ask the breaker of its candidate, and
+// each answer count for it (M4.3).
+func (d *Dispatch) WithBreakers(b *Breakers) *Dispatch { d.brk = b; return d }
 
 func NewDispatch(store *repository.Store, routes RouteSource, bank BankClient, cfg DispatchConfig) *Dispatch {
 	if cfg.Concurrency <= 0 {
@@ -110,7 +115,9 @@ func (d *Dispatch) dispatchOne(ctx context.Context, id string) error {
 		t       repository.Transfer
 		a       repository.Attempt
 		changes []change
+		notes   []note
 		started bool
+		probe   bool
 	)
 	err := d.store.InTx(ctx, func(tx *repository.Tx) error {
 		var ok bool
@@ -124,6 +131,28 @@ func (d *Dispatch) dispatchOne(ctx context.Context, id string) error {
 			return nil
 		}
 		cands := candidates(t)
+		// The breaker of each candidate decides, now (P§3.3): an open one is
+		// skipped for this new attempt.
+		var skipped []string
+		idx := t.CandidateIndex
+		for ; idx < len(cands) && d.brk != nil; idx++ {
+			dec, ns, err := d.brk.allowTx(ctx, tx, cands[idx].BankMiddleware, cands[idx].Rail)
+			notes = append(notes, ns...)
+			if err != nil {
+				return err
+			}
+			if dec.Allowed {
+				probe = dec.Probe
+				break
+			}
+			skipped = append(skipped, cands[idx].BankMiddleware+"/"+cands[idx].Rail)
+		}
+		if idx != t.CandidateIndex {
+			if err := tx.SetDispatchPlan(ctx, t.ID, idx, 0, nil); err != nil {
+				return err
+			}
+			t.CandidateIndex, t.SameNodeRetries = idx, 0
+		}
 		if t.CandidateIndex >= len(cands) { // nothing left to try
 			c, err := finish(ctx, tx, &t, now, contract.TransferResult{Status: contract.StatusFailed, Reason: contract.ReasonRailUnavailable,
 				Attempts: t.CurrentAttempt})
@@ -143,9 +172,20 @@ func (d *Dispatch) dispatchOne(ctx context.Context, id string) error {
 		if err := tx.SetCurrentAttempt(ctx, t.ID, a.AttemptNo); err != nil {
 			return err
 		}
+		if probe {
+			if err := tx.SetAttemptProbe(ctx, t.ID, a.AttemptNo); err != nil {
+				return err
+			}
+		}
 		t.CurrentAttempt = a.AttemptNo
-		detail, _ := json.Marshal(map[string]any{"bank_middleware": a.BankMiddleware, "rail": a.Rail, "request_id": a.RequestID,
-			"same_node_retry": t.SameNodeRetries})
+		info := map[string]any{"bank_middleware": a.BankMiddleware, "rail": a.Rail, "request_id": a.RequestID, "same_node_retry": t.SameNodeRetries}
+		if len(skipped) > 0 {
+			info["skipped_open_breakers"] = skipped
+		}
+		if probe {
+			info["breaker_probe"] = true
+		}
+		detail, _ := json.Marshal(info)
 		c, err := transition(ctx, tx, &t, transfer.Dispatching, contract.EventAttemptDispatching, now, contract.JournalPayload{AttemptNo: a.AttemptNo, Detail: detail})
 		changes = append(changes, c)
 		started = err == nil
@@ -155,6 +195,9 @@ func (d *Dispatch) dispatchOne(ctx context.Context, id string) error {
 		return d.pgError(ctx, "transfer.dispatch", id, err)
 	}
 	logChanges(ctx, changes)
+	for _, n := range notes {
+		n(ctx)
+	}
 	if !started {
 		return nil
 	}
@@ -164,6 +207,9 @@ func (d *Dispatch) dispatchOne(ctx context.Context, id string) error {
 	logCall(ctx, "transfer.dispatch", a, out)
 	if ctx.Err() != nil { // stopping: the attempt may have been sent; the inquiry job resolves it
 		return nil
+	}
+	if d.brk != nil {
+		_ = d.brk.Record(ctx, a.BankMiddleware, a.Rail, breakerKind(out), probe) // logged; the dispatch goes on
 	}
 	return d.applyReport(ctx, t.ID, a.AttemptNo, report{res: out.Result, noSameNode: out.NoSameNode, src: fromDispatch})
 }

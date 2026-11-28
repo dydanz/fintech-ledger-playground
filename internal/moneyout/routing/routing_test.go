@@ -244,3 +244,27 @@ func (d dropRail) Apply(_ context.Context, _ routing.Request, in []routing.Candi
 	}
 	return out, ds
 }
+
+type openBreakers map[string]bool
+
+func (o openBreakers) Open(bmw, rail string) bool { return o[bmw+"/"+rail] }
+
+// breaker_open drops a candidate whose breaker is open, at decision time,
+// and says so (P§3.3, T§6.4). Without a breaker view it keeps everything.
+func TestBreakerOpenRule(t *testing.T) {
+	cfg := strings.Replace(sample, "intrabank_preference]", "intrabank_preference, breaker_open]", 1)
+	c, err := routing.ParseWith([]byte(cfg), routing.Deps{Breakers: openBreakers{"bmw-a/BIFAST": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := route(c, 1_000_000, "022", midweek)
+	if want := "bmw-c/BIFAST bmw-d/BIFAST bmw-a/RTOL bmw-d/SKNBI"; names(got.Candidates) != want {
+		t.Fatalf("candidates = %s, want %s", names(got.Candidates), want)
+	}
+	if !hasDecision(got, "bmw-a", "BIFAST", "breaker_open", false, "breaker_open") {
+		t.Fatalf("no breaker_open decision: %+v", got.Decisions)
+	}
+	if got := names(route(chain(t, cfg), 1_000_000, "022", midweek).Candidates); !strings.HasPrefix(got, "bmw-a/BIFAST") {
+		t.Fatalf("without a view: %s", got)
+	}
+}

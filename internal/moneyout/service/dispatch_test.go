@@ -21,6 +21,7 @@ import (
 	"fintech-ledger-playground/internal/bankmw"
 	"fintech-ledger-playground/internal/logger"
 	"fintech-ledger-playground/internal/moneyout/bmwclient"
+	"fintech-ledger-playground/internal/moneyout/breaker"
 	"fintech-ledger-playground/internal/moneyout/contract"
 	"fintech-ledger-playground/internal/moneyout/repository"
 	"fintech-ledger-playground/internal/moneyout/routing"
@@ -100,6 +101,7 @@ type denv struct {
 	servers  map[string]*httptest.Server
 	router   *service.Router
 	dispatch *service.Dispatch
+	breakers *service.Breakers
 }
 
 type dopts struct {
@@ -108,6 +110,7 @@ type dopts struct {
 	down       []string // bank middlewares not listening
 	foreignKey []string // bank middlewares that trust another MOM key
 	retryBase  time.Duration
+	breaker    *breaker.Config // breakers on, with breaker_open in the chain
 }
 
 func newDispatchEnv(t *testing.T, o dopts) *denv {
@@ -145,7 +148,12 @@ func newDispatchEnv(t *testing.T, o dopts) *denv {
 		t.Cleanup(srv.Close)
 		e.urls[name], e.servers[name] = srv.URL, srv
 	}
-	c, err := routing.Parse([]byte(dispatchRoutes))
+	routesYAML, deps := dispatchRoutes, routing.Deps{}
+	if o.breaker != nil {
+		e.breakers = service.NewBreakers(e.store, *o.breaker)
+		routesYAML, deps = strings.Replace(dispatchRoutes, "amount_rail_limits]", "amount_rail_limits, breaker_open]", 1), routing.Deps{Breakers: e.breakers}
+	}
+	c, err := routing.ParseWith([]byte(routesYAML), deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +162,9 @@ func newDispatchEnv(t *testing.T, o dopts) *denv {
 	e.dispatch = service.NewDispatch(e.store, staticRoutes{c}, client, service.DispatchConfig{
 		InquiryInterval: 20 * time.Millisecond, InquiryFor: o.inquiryFor, StaleDispatch: 300 * time.Millisecond,
 		RetryBase: o.retryBase, RetryMax: 4 * o.retryBase, Concurrency: 8})
+	if e.breakers != nil {
+		e.dispatch.WithBreakers(e.breakers)
+	}
 	return e
 }
 
@@ -171,6 +182,11 @@ func (e *denv) drive(id string, states ...transfer.State) repository.Transfer {
 	e.t.Helper()
 	deadline := time.Now().Add(8 * time.Second)
 	for {
+		if e.breakers != nil { // as MOM's background refresh does: the routing rule reads it
+			if err := e.breakers.Refresh(e.ctx); err != nil {
+				e.t.Fatal(err)
+			}
+		}
 		for _, run := range []func(context.Context) error{e.router.Run, e.dispatch.RunDispatch, e.dispatch.RunInquiries} {
 			if err := run(e.ctx); err != nil {
 				e.t.Fatal(err)

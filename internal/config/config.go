@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"fintech-ledger-playground/internal/moneyout/breaker"
 )
 
 type Config struct {
@@ -621,6 +623,7 @@ type MoneyOutConfig struct {
 	RetryBase       time.Duration     // MOM_RETRY_BASE: same-node retry backoff
 	RetryMax        time.Duration     // MOM_RETRY_MAX
 	BankEventsGroup string            // MOM_BANK_EVENTS_GROUP: consumer group on money-out.bank-events.v1
+	Breaker         breaker.Config    // MOM_BREAKER_*: the circuit breakers (M4.3)
 }
 
 // parseEndpoints reads "name=url,name=url".
@@ -712,6 +715,30 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 		} else if *d.dst <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be positive", d.key))
 		}
+	}
+	cfg.Breaker = breaker.Config{Window: time.Minute, Cooldown: 30 * time.Second, ProbeTimeout: cfg.StaleDispatch}
+	for _, n := range []struct {
+		dst *int
+		key string
+		def int
+	}{
+		{&cfg.Breaker.Failures, "MOM_BREAKER_FAILURES", 5},
+		{&cfg.Breaker.ErrorRatePercent, "MOM_BREAKER_ERROR_RATE", 50},
+		{&cfg.Breaker.MinCalls, "MOM_BREAKER_MIN_CALLS", 10},
+		{&cfg.Breaker.Probes, "MOM_BREAKER_PROBES", 1},
+	} {
+		if *n.dst, err = getInt(n.key, n.def); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if cfg.Breaker.Window, err = getDuration("MOM_BREAKER_WINDOW", time.Minute); err != nil {
+		errs = append(errs, err)
+	}
+	if cfg.Breaker.Cooldown, err = getDuration("MOM_BREAKER_COOLDOWN", 30*time.Second); err != nil {
+		errs = append(errs, err)
+	}
+	if err := cfg.Breaker.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("MOM_BREAKER_*: %w", err))
 	}
 	if cfg.StaleDispatch <= cfg.BMWTimeout {
 		errs = append(errs, errors.New("MOM_STALE_DISPATCH must be longer than MOM_BMW_TIMEOUT: a call still in flight isn't stale"))

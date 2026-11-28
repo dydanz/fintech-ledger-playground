@@ -44,3 +44,4 @@ rules:
   - amount_rail_limits
   - rail_window
   - intrabank_preference
+  - breaker_open           # an open circuit breaker skips the candidate (M4.3); the dispatcher checks again before each attempt

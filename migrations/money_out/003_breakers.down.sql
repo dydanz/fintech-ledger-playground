@@ -1,0 +1,4 @@
+BEGIN;
+ALTER TABLE attempts DROP COLUMN IF EXISTS breaker_probe;
+DROP TABLE IF EXISTS breakers;
+COMMIT;

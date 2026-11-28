@@ -410,3 +410,29 @@ func TestLoadMoneyOutDispatch(t *testing.T) {
 		})
 	}
 }
+
+// Circuit breaker thresholds (P§3.3). The probe timeout is
+// MOM_STALE_DISPATCH: a probe older than that was interrupted.
+func TestLoadMoneyOutBreaker(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
+	cfg, err := config.LoadMoneyOut()
+	b := cfg.Breaker
+	if err != nil || b.Failures != 5 || b.Window != time.Minute || b.ErrorRatePercent != 50 || b.MinCalls != 10 || b.Cooldown != 30*time.Second ||
+		b.Probes != 1 || b.ProbeTimeout != cfg.StaleDispatch {
+		t.Fatalf("defaults = %+v, %v", b, err)
+	}
+	t.Setenv("MOM_BREAKER_FAILURES", "3")
+	t.Setenv("MOM_BREAKER_COOLDOWN", "5s")
+	if cfg, err = config.LoadMoneyOut(); err != nil || cfg.Breaker.Failures != 3 || cfg.Breaker.Cooldown != 5*time.Second {
+		t.Fatalf("overrides = %+v, %v", cfg.Breaker, err)
+	}
+	for k, v := range map[string]string{"MOM_BREAKER_FAILURES": "0", "MOM_BREAKER_ERROR_RATE": "120", "MOM_BREAKER_PROBES": "0"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, v)
+			if _, err := config.LoadMoneyOut(); err == nil {
+				t.Fatalf("%s=%s accepted", k, v)
+			}
+		})
+	}
+}

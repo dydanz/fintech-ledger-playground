@@ -19,20 +19,25 @@ type Watcher struct {
 	current atomic.Pointer[Chain]
 	seen    [sha256.Size]byte // the content last acted on, good or bad
 	missing bool
+	deps    Deps
 }
 
 // NewWatcher loads path. At startup there's no previous chain, so a missing
 // or invalid file is an error.
-func NewWatcher(ctx context.Context, path string) (*Watcher, error) {
+func NewWatcher(ctx context.Context, path string, deps ...Deps) (*Watcher, error) {
+	var d Deps
+	if len(deps) > 0 {
+		d = deps[0]
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("routing: %w", err)
 	}
-	c, err := Parse(b)
+	c, err := ParseWith(b, d)
 	if err != nil {
 		return nil, err
 	}
-	w := &Watcher{path: path, seen: sha256.Sum256(b)}
+	w := &Watcher{path: path, seen: sha256.Sum256(b), deps: d}
 	w.current.Store(c)
 	log := logger.FromContext(ctx)
 	log.InfoContext(ctx, "routing configuration loaded", "event", "transfer.routing_config", "outcome", "success",
@@ -76,7 +81,7 @@ func (w *Watcher) Check(ctx context.Context) {
 		return
 	}
 	w.seen = sum
-	c, err := Parse(b)
+	c, err := ParseWith(b, w.deps)
 	if err != nil {
 		log.ErrorContext(ctx, "routing configuration rejected; keeping the live chain", "event", "transfer.routing_config",
 			"outcome", "failure", "reason", "invalid_config", "config_version", w.Chain().Version(), "error", err)

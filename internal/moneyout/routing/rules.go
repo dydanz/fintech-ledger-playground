@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// The initial rules (T§6.4). breaker_open joins them in M4.3.
+// The rules of T§6.4.
 func init() {
+	RegisterDep("breaker_open", func(_ *Config, d Deps) (Rule, error) { return breakerRule{d.Breakers}, nil })
 	Register("bmw_enabled", func(c *Config) (Rule, error) { return enabledRule{c}, nil })
 	Register("rail_capability", func(c *Config) (Rule, error) { return capabilityRule{c}, nil })
 	Register("amount_rail_limits", func(c *Config) (Rule, error) { return limitsRule{c}, nil })
@@ -109,4 +110,16 @@ func (r homeBankRule) Apply(_ context.Context, req Request, in []Candidate) ([]C
 		rest = append(rest, c)
 	}
 	return append(home, rest...), ds
+}
+
+// breakerRule skips a candidate whose breaker is open (P§3.3), as last
+// seen: the dispatcher checks again, authoritatively, before each attempt.
+type breakerRule struct{ view BreakerView }
+
+func (breakerRule) Name() string { return "breaker_open" }
+
+func (r breakerRule) Apply(_ context.Context, _ Request, in []Candidate) ([]Candidate, []Decision) {
+	return filter(r.Name(), in, func(c Candidate) (bool, string) {
+		return r.view == nil || !r.view.Open(c.BankMiddleware, c.Rail), "breaker_open"
+	})
 }

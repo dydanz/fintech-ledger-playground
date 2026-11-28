@@ -587,6 +587,38 @@
           "legendFormat": "{{event}} {{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Circuit breakers: transitions by target state (transfer.breaker)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (bank_middleware, rail, to_state, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.breaker\" [5m]))",
+          "legendFormat": "{{bank_middleware}}/{{rail}} \u2192 {{to_state}} {{reason}}"
+        }
+      ]
     }
   ]
 }
