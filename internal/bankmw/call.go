@@ -50,8 +50,14 @@ func Do(ctx context.Context, client *http.Client, step string, hr *http.Request,
 	switch {
 	case err != nil:
 		reason := "timeout"
-		if r.NotReached {
+		switch {
+		case r.NotReached:
 			reason = "connection_refused"
+		case errors.Is(err, context.Canceled) && ctx.Err() != nil:
+			// This process canceled it (shutdown, or MOM's request ended),
+			// not the bank. The bank may still have acted: the result is the
+			// same as a timeout's.
+			reason = "canceled"
 		}
 		log.WarnContext(ctx, "bank call failed", append(attrs, "outcome", "failure", "reason", reason)...)
 	case r.Status/100 != 2:

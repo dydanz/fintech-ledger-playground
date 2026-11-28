@@ -665,6 +665,47 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # Async: answers ACCEPTED, then polls remit-status and publishes PROCESSING
+  # and the terminal status to money-out.bank-events.v1 (T§11.4).
+  bank-middleware-d:
+    build:
+      context: .
+      args:
+        CMD: bank-middleware-d
+    image: bank-middleware-d:local
+    profiles: [money-out]
+    environment:
+      SERVICE_NAME: bank-middleware-d
+      BMW_NAME: bank-middleware-d
+      BMW_HTTP_ADDR: ":8086"
+      MOM_PUBLIC_KEYS_FILE: /keys/mom-public.keys
+      KAFKA_BROKERS: kafka:9092
+      BANK_D_BASE_URL: http://bank-sim-d:8090
+      BANK_D_CLIENT_KEY: ${SIM_D_CLIENT_KEY:-ent_client_d_004}
+      BANK_D_SECRET: ${SIM_D_SECRET:-dev-bank-d-secret}
+      BANK_D_FUNDING_ACCOUNT: ${SIM_D_FUNDING_ACCT:-8800112233}
+      BANK_D_POLL_INTERVAL: ${BANK_D_POLL_INTERVAL:-5s}
+      BANK_D_POLL_FOR: ${BANK_D_POLL_FOR:-30m}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - moneyoutkeys:/keys:ro
+    ports:
+      - "127.0.0.1:8184:8086"
+    depends_on:
+      money-out-keys-init:
+        condition: service_completed_successfully
+      money-out-kafka-init:
+        condition: service_completed_successfully
+      bank-sim-d:
+        condition: service_healthy
+    labels:
+      logging: alloy
+    logging: *logging
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   pgdata:
   kafkadata:

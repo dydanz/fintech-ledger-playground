@@ -331,6 +331,38 @@
           "legendFormat": "{{service}} {{step}} {{outcome}} {{reason}}"
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Bank D: status pollers stopped by outcome and reason (bank.poll)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"bank-middleware-d\"} | json | event=\"bank.poll\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }
