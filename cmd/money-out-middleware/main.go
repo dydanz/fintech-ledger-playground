@@ -3,7 +3,9 @@
 // money-out.commands.v1 through the idempotency gate, keeps each transfer's
 // state in its own database, journals every transition to
 // money-out.journal.v1 through its outbox, and serves the read-only ops API.
-// Routing, dispatch and reconciliation arrive in later phases (M4, M6).
+// It routes each RECEIVED transfer with the rule chain in MOM_ROUTING_FILE,
+// reloaded when the file changes (M4.1). Dispatch and reconciliation arrive
+// in later phases (M4.2, M6).
 package main
 
 import (
@@ -26,6 +28,7 @@ import (
 	moapi "fintech-ledger-playground/internal/moneyout/api"
 	"fintech-ledger-playground/internal/moneyout/contract"
 	"fintech-ledger-playground/internal/moneyout/repository"
+	"fintech-ledger-playground/internal/moneyout/routing"
 	"fintech-ledger-playground/internal/moneyout/service"
 	"fintech-ledger-playground/internal/outbox"
 	"fintech-ledger-playground/internal/startup"
@@ -54,6 +57,12 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx = logger.WithContext(ctx, log)
+
+	// No routing, no start: there's no previous chain to fall back on.
+	routes, err := routing.NewWatcher(ctx, cfg.RoutingFile)
+	if err != nil {
+		return err
+	}
 
 	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 16)
 	if err != nil {
@@ -91,12 +100,17 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		routes.Run(ctx, cfg.RoutingReload)
+	}()
 	go func() {
 		defer wg.Done()
 		worker.NewRunner(db,
 			worker.Job{Name: "outbox_relay", Interval: cfg.OutboxPoll, Run: relay.Run},
 			worker.Job{Name: "outbox_purge", Interval: 10 * time.Minute, Run: relay.Purge},
+			worker.Job{Name: "router", Interval: 200 * time.Millisecond, Run: service.NewRouter(store, routes, time.Now).Run},
 		).Run(ctx)
 	}()
 	go func() {

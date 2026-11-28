@@ -347,3 +347,22 @@ func TestParseMoneyOutClients(t *testing.T) {
 		}
 	}
 }
+
+// The routing file and how often it's checked for a change (P§3.1).
+func TestLoadMoneyOutRouting(t *testing.T) {
+	t.Setenv("MOM_DATABASE_URL", "postgres://x/money_out")
+	t.Setenv("MOM_CLIENTS", "ops:9d121d994c8c0ac8cc7786f5c0c775588c389b87416c38dd89acdefde3757d21")
+	cfg, err := config.LoadMoneyOut()
+	if err != nil || cfg.RoutingFile != "config/money-out/routing.yaml" || cfg.RoutingReload != 5*time.Second {
+		t.Fatalf("defaults = %q %s, %v", cfg.RoutingFile, cfg.RoutingReload, err)
+	}
+	t.Setenv("MOM_ROUTING_FILE", "/etc/money-out/routing.yaml")
+	t.Setenv("MOM_ROUTING_RELOAD", "1s")
+	if cfg, err = config.LoadMoneyOut(); err != nil || cfg.RoutingFile != "/etc/money-out/routing.yaml" || cfg.RoutingReload != time.Second {
+		t.Fatalf("overrides = %q %s, %v", cfg.RoutingFile, cfg.RoutingReload, err)
+	}
+	t.Setenv("MOM_ROUTING_RELOAD", "0s")
+	if _, err := config.LoadMoneyOut(); err == nil {
+		t.Fatal("MOM_ROUTING_RELOAD=0s accepted")
+	}
+}

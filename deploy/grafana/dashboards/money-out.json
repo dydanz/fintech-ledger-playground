@@ -427,6 +427,70 @@
           "legendFormat": "{{outcome}} {{reason}} executed={{executed}}"
         }
       ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Routing: transfers routed or failed for no candidate (transfer.route)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason, result_reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.route\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}} {{result_reason}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Routing config: reloads and rejected files (transfer.routing_config, failure should be 0)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (outcome, reason) (count_over_time({service=\"money-out-middleware\"} | json | event=\"transfer.routing_config\" [5m]))",
+          "legendFormat": "{{outcome}} {{reason}}"
+        }
+      ]
     }
   ]
 }

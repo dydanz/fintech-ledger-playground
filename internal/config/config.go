@@ -607,6 +607,8 @@ type MoneyOutConfig struct {
 	OutboxBatch     int           // OUTBOX_BATCH_SIZE
 	OutboxRetention time.Duration // OUTBOX_RETENTION
 	OutboxPublish   time.Duration // OUTBOX_PUBLISH_TIMEOUT
+	RoutingFile     string        // MOM_ROUTING_FILE: config/money-out/routing.yaml (P§3.1)
+	RoutingReload   time.Duration // MOM_ROUTING_RELOAD: how often the file is checked for a change
 }
 
 func LoadMoneyOut() (MoneyOutConfig, error) {
@@ -619,6 +621,7 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 		KafkaBrokers:    splitList(getEnv("KAFKA_BROKERS", "localhost:9094")),
 		Group:           getEnv("MOM_CONSUMER_GROUP", "money-out-middleware"),
 		ShutdownTimeout: 15 * time.Second,
+		RoutingFile:     getEnv("MOM_ROUTING_FILE", "config/money-out/routing.yaml"),
 	}
 	if cfg.DatabaseURL == "" {
 		errs = append(errs, errors.New("MOM_DATABASE_URL is required"))
@@ -649,6 +652,7 @@ func LoadMoneyOut() (MoneyOutConfig, error) {
 		{&cfg.OutboxRetention, "OUTBOX_RETENTION", 72 * time.Hour},
 		{&cfg.OutboxPublish, "OUTBOX_PUBLISH_TIMEOUT", 10 * time.Second},
 		{&cfg.ShutdownTimeout, "SHUTDOWN_TIMEOUT", 15 * time.Second},
+		{&cfg.RoutingReload, "MOM_ROUTING_RELOAD", 5 * time.Second},
 	} {
 		if *d.dst, err = getDuration(d.key, d.def); err != nil {
 			errs = append(errs, err)
