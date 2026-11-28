@@ -1,0 +1,46 @@
+# money-out-middleware's routing (P§3.1, spec/money-out TRD §6.4). MOM reads
+# this file at start and reloads it when it changes (MOM_ROUTING_RELOAD); a
+# version that doesn't validate is refused, and the live one stays. Every
+# bank-specific value lives here, never in MOM's code (P§8).
+#
+# (A) marks an assumption, as in the TRD.
+version: 1
+
+# Limits are in this currency's minor units: IDR, exponent 0 (L§4.1 A2).
+currency: IDR
+
+# Q5: BIFAST, then RTOL, then SKNBI, then RTGS. INTRABANK first: it only
+# applies to a beneficiary at a bank middleware's own bank.
+rail_order: [INTRABANK, BIFAST, RTOL, SKNBI, RTGS]
+
+# In preference order within a rail. rails = what each adapter implements.
+bank_middlewares:
+  - name: bank-middleware-a
+    rails: [BIFAST, RTOL]          # (A): S:A shows only channel BIFAST
+  - name: bank-middleware-b
+    rails: [INTRABANK]             # S:B's transfer has no beneficiary bank code: only to its own bank (BMW-B README; narrows T§11.4's draft)
+    home_bank: "014"
+  - name: bank-middleware-c
+    rails: [BIFAST]                # (A): S:C has no rail field
+  - name: bank-middleware-d
+    rails: [BIFAST, SKNBI, RTGS]   # explicit in S:D
+
+# Per transaction, inclusive (P§3.1).
+limits:
+  BIFAST: {max: 250000000}
+  RTOL:   {max: 50000000}
+  SKNBI:  {max: 1000000000}        # (A): Bank Indonesia's SKNBI maximum
+  RTGS:   {min: 100000000}
+
+# WIB, open inclusive, close exclusive. BIFAST and RTOL run around the clock.
+windows:
+  RTGS:  {open: "06:30", close: "15:00", weekdays_only: true}   # (A): BI-RTGS cut-off, T§6.4's example
+  SKNBI: {open: "08:00", close: "15:00", weekdays_only: true}   # (A)
+
+# In order. Each is a registered rule class (internal/moneyout/routing).
+rules:
+  - bmw_enabled            # the kill switch: add `enabled: false` to a bank middleware
+  - rail_capability
+  - amount_rail_limits
+  - rail_window
+  - intrabank_preference

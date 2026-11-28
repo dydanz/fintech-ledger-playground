@@ -274,3 +274,52 @@ func nullJSON(b json.RawMessage) any {
 	}
 	return b
 }
+
+// ListInState returns up to limit transfer ids in state, oldest change
+// first. A worker then locks each one and re-checks its state.
+func (s *Store) ListInState(ctx context.Context, state transfer.State, limit int) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT transfer_id::text FROM transfers WHERE state = $1 ORDER BY updated_at LIMIT $2`, string(state), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", state, err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list %s: %w", state, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// TryLockTransfer reads a transfer FOR UPDATE SKIP LOCKED: ok is false when
+// another worker holds it.
+func (x *Tx) TryLockTransfer(ctx context.Context, id string) (t Transfer, ok bool, err error) {
+	t, err = scanTransfer(x.tx.QueryRow(ctx, `SELECT `+transferColumns+` FROM transfers WHERE transfer_id = $1 FOR UPDATE SKIP LOCKED`, id))
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return Transfer{}, false, nil
+	case err != nil:
+		return Transfer{}, false, fmt.Errorf("lock transfer: %w", err)
+	}
+	return t, true, nil
+}
+
+// SetRouting stores the routing decision (P§3.1).
+func (x *Tx) SetRouting(ctx context.Context, id string, routing json.RawMessage) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET routing = $2, updated_at = now() WHERE transfer_id = $1`, id, routing); err != nil {
+		return fmt.Errorf("set routing: %w", err)
+	}
+	return nil
+}
+
+// SetCoreAckPending marks that a terminal result went to the core and its
+// acknowledgement is awaited (P§3.4a #4).
+func (x *Tx) SetCoreAckPending(ctx context.Context, id string) error {
+	if _, err := x.tx.Exec(ctx, `UPDATE transfers SET core_ack = 'pending', updated_at = now() WHERE transfer_id = $1 AND core_ack = 'none'`, id); err != nil {
+		return fmt.Errorf("set core_ack: %w", err)
+	}
+	return nil
+}
