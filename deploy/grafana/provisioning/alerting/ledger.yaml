@@ -228,3 +228,34 @@ groups:
             Nothing is lost: a partition is dropped only after its export is verified in a write-once bucket.
             step and reason say where it stopped: bucket_not_worm (the bucket isn't in Object Lock compliance mode),
             export_failed, verify_failed, detach_failed (detach or drop), pg_error. The next daily run resumes.
+
+      - uid: money-out-late-event
+        title: Money-out possible double payment (late bank event)
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: A
+              queryType: instant
+              expr: sum(count_over_time({service="money-out-middleware"} | json | event="transfer.late_event" [5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: page, service: money-out-middleware}
+        annotations:
+          summary: '{{ if and $values.A $values.A.Value }}{{ $values.A.Value }}{{ else }}Some{{ end }} bank event(s) reported money moving on an attempt MOM had given up on.'
+          description: >-
+            A bank answered SUCCEEDED, PROCESSING or ACCEPTED for an attempt MOM had failed or failed over from (Review Focus 1):
+            the money may have gone out twice. An open transfer is parked in NEEDS_MANUAL_REVIEW (review_reason late_event) and
+            nothing terminal goes to the core; a transfer already SUCCEEDED or FAILED can't move. Check both attempts at their banks
+            (GET /transfers/{id}) before resolving it (RUNBOOK).

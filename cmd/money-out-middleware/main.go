@@ -3,7 +3,11 @@
 // money-out.commands.v1 through the idempotency gate, keeps each transfer's
 // state in its own database, journals every transition to
 // money-out.journal.v1 through its outbox, and serves the read-only ops API.
-// Routing, dispatch and reconciliation arrive in later phases (M4, M6).
+// It routes each RECEIVED transfer with the rule chain in MOM_ROUTING_FILE,
+// reloaded when the file changes (M4.1), and, with MOM_BANK_MIDDLEWARES set,
+// dispatches signed attempts to the bank middlewares, retries, fails over,
+// inquires open attempts and applies their bank events (M4.2).
+// Reconciliation arrives in M6.
 package main
 
 import (
@@ -24,9 +28,12 @@ import (
 	"fintech-ledger-playground/internal/kafka"
 	"fintech-ledger-playground/internal/logger"
 	moapi "fintech-ledger-playground/internal/moneyout/api"
+	"fintech-ledger-playground/internal/moneyout/bmwclient"
 	"fintech-ledger-playground/internal/moneyout/contract"
 	"fintech-ledger-playground/internal/moneyout/repository"
+	"fintech-ledger-playground/internal/moneyout/routing"
 	"fintech-ledger-playground/internal/moneyout/service"
+	"fintech-ledger-playground/internal/moneyout/signing"
 	"fintech-ledger-playground/internal/outbox"
 	"fintech-ledger-playground/internal/startup"
 	"fintech-ledger-playground/internal/worker"
@@ -54,6 +61,12 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx = logger.WithContext(ctx, log)
+
+	// No routing, no start: there's no previous chain to fall back on.
+	routes, err := routing.NewWatcher(ctx, cfg.RoutingFile)
+	if err != nil {
+		return err
+	}
 
 	db, err := startup.ConnectPostgres(ctx, log, cfg.DatabaseURL, 16)
 	if err != nil {
@@ -90,15 +103,51 @@ func run(cfg config.MoneyOutConfig, log *slog.Logger) error {
 		return fmt.Errorf("connect kafka: %w", err)
 	}
 
+	jobs := []worker.Job{
+		{Name: "outbox_relay", Interval: cfg.OutboxPoll, Run: relay.Run},
+		{Name: "outbox_purge", Interval: 10 * time.Minute, Run: relay.Purge},
+		{Name: "router", Interval: 200 * time.Millisecond, Run: service.NewRouter(store, routes, time.Now).Run},
+	}
+	var bankEvents *kafka.Consumer
+	var dispatch *service.Dispatch
+	if len(cfg.BankMiddlewares) > 0 {
+		key, err := signing.ParsePrivateKey(cfg.SigningKey)
+		if err != nil {
+			return fmt.Errorf("MOM_SIGNING_KEY: %w", err)
+		}
+		client := bmwclient.New(signing.NewSigner(cfg.SigningKID, key), cfg.BankMiddlewares, &http.Client{Timeout: cfg.BMWTimeout})
+		dispatch = service.NewDispatch(store, routes, client, service.DispatchConfig{InquiryInterval: cfg.InquiryInterval,
+			InquiryFor: cfg.InquiryFor, StaleDispatch: cfg.StaleDispatch, RetryBase: cfg.RetryBase, RetryMax: cfg.RetryMax})
+		jobs = append(jobs,
+			worker.Job{Name: "dispatcher", Interval: 200 * time.Millisecond, Run: dispatch.RunDispatch},
+			worker.Job{Name: "inquiries", Interval: min(cfg.InquiryInterval, time.Second), Run: dispatch.RunInquiries})
+		if bankEvents, err = kafka.NewConsumer(cfg.KafkaBrokers, cfg.BankEventsGroup, contract.TopicBankEvents); err != nil {
+			return err
+		}
+		defer bankEvents.Close()
+	} else {
+		log.WarnContext(ctx, "MOM_BANK_MIDDLEWARES is empty: transfers are routed but not dispatched", "event", "app.lifecycle",
+			"outcome", "success", "dispatch", false)
+	}
+
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		worker.NewRunner(db,
-			worker.Job{Name: "outbox_relay", Interval: cfg.OutboxPoll, Run: relay.Run},
-			worker.Job{Name: "outbox_purge", Interval: 10 * time.Minute, Run: relay.Purge},
-		).Run(ctx)
+		routes.Run(ctx, cfg.RoutingReload)
 	}()
+	go func() {
+		defer wg.Done()
+		worker.NewRunner(db, jobs...).Run(ctx)
+	}()
+	if bankEvents != nil { // every instance consumes: the group spreads the partitions
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = service.NewConsumer(bankEvents, service.HandlerFunc(dispatch.ReceiveBankEvent), 100*time.Millisecond, 5*time.Second).
+				WithNames("money_out_bank_events_poll", "money_out_bank_events_commit", "transfer.bank_event").Run(ctx)
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		_ = service.NewConsumer(consumer, service.NewIntake(store), 100*time.Millisecond, 5*time.Second).Run(ctx)
